@@ -1,0 +1,68 @@
+import "../plugins/sdl2.noe"
+
+function sdl2_fail(stage) {
+    IO.panic("#{stage}: #{SDL2.get_error()}")
+}
+
+if SDL2.init(SDL2.INIT_VIDEO) != 0 {
+    sdl2_fail("SDL_Init")
+}
+
+var window = SDL2.create_window(
+    "Noema SDL2 Demo",
+    SDL2.WINDOWPOS_CENTERED,
+    SDL2.WINDOWPOS_CENTERED,
+    640,
+    360,
+    SDL2.WINDOW_SHOWN
+)
+
+if not window {
+    sdl2_fail("SDL_CreateWindow")
+}
+
+var renderer = SDL2.create_renderer(window, -1, SDL2.RENDERER_SOFTWARE)
+if not renderer {
+    SDL2.destroy_window(window)
+    sdl2_fail("SDL_CreateRenderer")
+}
+
+var event = SDL2.make_event()
+var rect = SDL2.make_rect(40, 120, 120, 120)
+var running = true
+var frame = 0
+
+while running and frame < 240 {
+    while SDL2.poll_event(event) == 1 {
+        if SDL2.event_type(event) == SDL2.QUIT {
+            running = false
+        }
+    }
+
+    var x = 40 + int(Math.sin(frame / 18) * 160 + 160)
+    var y = 110 + int(Math.cos(frame / 22) * 50 + 50)
+    SDL2.rect_set(rect, x, y, 120, 120)
+
+    SDL2.set_render_draw_color(renderer, 14, 18, 28, 255)
+    SDL2.render_clear(renderer)
+
+    SDL2.set_render_draw_color(renderer, 80, 200, 120, 255)
+    SDL2.render_fill_rect(renderer, rect)
+
+    SDL2.set_render_draw_color(renderer, 255, 240, 120, 255)
+    SDL2.render_draw_line(renderer, 0, 0, x + 60, y + 60)
+    SDL2.render_draw_line(renderer, 639, 0, x + 60, y + 60)
+
+    SDL2.render_present(renderer)
+    SDL2.delay(16)
+    frame = frame + 1
+}
+
+SDL2.free(rect)
+SDL2.free(event)
+SDL2.destroy_renderer(renderer)
+SDL2.destroy_window(window)
+SDL2.quit()
+
+IO.show("frames", frame)
+IO.show("library", SDL2.loaded_library)

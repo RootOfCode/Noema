@@ -18,6 +18,8 @@ typedef union {
     char *texto;
 } SlotFfi;
 
+static const char *noema_ffi_erro_ultimo(void);
+
 static void *noema_ffi_abrir_biblioteca(const char *biblioteca) {
 #ifdef _WIN32
     return (void *)LoadLibraryA(biblioteca);
@@ -32,6 +34,35 @@ static void *noema_ffi_resolver_simbolo(void *alca, const char *simbolo) {
 #else
     return dlsym(alca, simbolo);
 #endif
+}
+
+static void *noema_ffi_abrir_bibliotecas(No *no_plugin, const char **biblioteca_carregada) {
+    char *erros = NULL;
+
+    for (int i = 0; i < no_plugin->como.plugin.quantidade_bibliotecas; i++) {
+        const char *biblioteca = no_plugin->como.plugin.bibliotecas[i];
+        void *alca = noema_ffi_abrir_biblioteca(biblioteca);
+        if (alca != NULL) {
+            if (biblioteca_carregada != NULL) {
+                *biblioteca_carregada = biblioteca;
+            }
+            return alca;
+        }
+
+        const char *erro = noema_ffi_erro_ultimo();
+        if (erros == NULL) {
+            erros = noema_formatar("%s (%s)", biblioteca, erro);
+        } else {
+            char *atualizado = noema_formatar("%s; %s (%s)", erros, biblioteca, erro);
+            free(erros);
+            erros = atualizado;
+        }
+    }
+
+    noema_falhar("falha ao abrir bibliotecas do plugin '%s': %s",
+                 no_plugin->como.plugin.nome,
+                 erros != NULL ? erros : "nenhuma biblioteca declarada");
+    return NULL;
 }
 
 static const char *noema_ffi_erro_ultimo(void) {
@@ -182,16 +213,15 @@ Valor ffi_invocar(Interpretador *interpretador, Ambiente *ambiente, int argc, Va
 
 void plugin_registrar_no_ambiente(Interpretador *interpretador, Ambiente *ambiente, No *no_plugin) {
     (void)interpretador;
-    void *alca = noema_ffi_abrir_biblioteca(no_plugin->como.plugin.biblioteca);
-    if (alca == NULL) {
-        noema_falhar("falha ao abrir biblioteca '%s': %s",
-                     no_plugin->como.plugin.biblioteca,
-                     noema_ffi_erro_ultimo());
-    }
+    const char *biblioteca_carregada = NULL;
+    void *alca = noema_ffi_abrir_bibliotecas(no_plugin, &biblioteca_carregada);
 
     Mapa *plugin = mapa_criar();
     mapa_definir(plugin, "kind", valor_texto("plugin"));
     mapa_definir(plugin, "name", valor_texto(no_plugin->como.plugin.nome));
+    if (biblioteca_carregada != NULL) {
+        mapa_definir(plugin, "loaded_library", valor_texto(biblioteca_carregada));
+    }
 
     for (int i = 0; i < no_plugin->como.plugin.quantidade_ligacoes; i++) {
         LigacaoPluginAst *origem = &no_plugin->como.plugin.ligacoes[i];
@@ -217,9 +247,10 @@ void plugin_registrar_no_ambiente(Interpretador *interpretador, Ambiente *ambien
         ligacao->alca_biblioteca = alca;
         ligacao->simbolo = noema_ffi_resolver_simbolo(alca, origem->nome_simbolo);
         if (ligacao->simbolo == NULL) {
-            noema_falhar("falha ao resolver simbolo '%s' no plugin '%s': %s",
+            noema_falhar("falha ao resolver simbolo '%s' no plugin '%s' em '%s': %s",
                          origem->nome_simbolo,
                          no_plugin->como.plugin.nome,
+                         biblioteca_carregada != NULL ? biblioteca_carregada : "<desconhecida>",
                          noema_ffi_erro_ultimo());
         }
 

@@ -288,9 +288,9 @@ static void repl_mostrar_ajuda_sintaxe(void) {
     printf("  fn square(x) => x * x\n");
     printf("  when answer > 0 { print(\"ok\") }\n");
     printf("  each item in [1, 2, 3] { print(item) }\n");
-    printf("  macro make_fn(name) { function $name() { return 1; } }\n");
+    printf("  macro unless_do(cond, body) { return syntax if not $cond { $body } }\n");
     printf("Recursos:\n");
-    printf("  funcoes, loops, listas, mapas, strings com #{...}, macros e eval\n");
+    printf("  funcoes, loops, listas, mapas, strings com #{...}, macros AST, syntax e eval\n");
     printf("  semicolon e opcional quando a linha ja termina a instrucao\n");
 }
 
@@ -317,7 +317,9 @@ static void repl_mostrar_ajuda_stdlib(void) {
 static void repl_mostrar_ajuda_ffi(void) {
     printf("Plugins e FFI\n");
     printf("  plugins ficam separados da stdlib\n");
-    printf("  escreva um arquivo com: plugin Nome { library \"...\" bind ... }\n");
+    printf("  use plugin Nome { library \"a\", \"b\" bind simbolo(...) -> tipo }\n");
+    printf("  o runtime tenta as bibliotecas na ordem declarada\n");
+    printf("  'as \"...\"' em bind e opcional quando o simbolo nativo tem o mesmo nome\n");
     printf("  tipos suportados: number, int, bool, string, pointer, void\n");
     printf("  Linux costuma usar .so; Windows costuma usar .dll\n");
 }

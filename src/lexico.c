@@ -81,6 +81,7 @@ static TipoToken palavra_chave(const char *texto) {
     if (strcmp(texto, "use") == 0) return TOKEN_IMPORT;
     if (strcmp(texto, "macro") == 0) return TOKEN_MACRO;
     if (strcmp(texto, "expand") == 0) return TOKEN_EXPAND;
+    if (strcmp(texto, "syntax") == 0) return TOKEN_SYNTAX;
     if (strcmp(texto, "plugin") == 0) return TOKEN_PLUGIN;
     if (strcmp(texto, "library") == 0) return TOKEN_LIBRARY;
     if (strcmp(texto, "bind") == 0) return TOKEN_BIND;
@@ -153,6 +154,18 @@ static void ignorar_espacos_e_comentarios(Lexico *lexico) {
 }
 
 static Token ler_numero(Lexico *lexico) {
+    if (lexico->fonte[lexico->inicio] == '0' &&
+        (atual(lexico) == 'x' || atual(lexico) == 'X') &&
+        isxdigit((unsigned char)espiar_proximo(lexico))) {
+        avancar(lexico);
+        while (isxdigit((unsigned char)atual(lexico))) {
+            avancar(lexico);
+        }
+        Token token = token_simples(lexico, TOKEN_NUMERO);
+        token.literal = noema_duplicar(token.lexema);
+        return token;
+    }
+
     while (isdigit((unsigned char)atual(lexico))) {
         avancar(lexico);
     }

@@ -61,6 +61,7 @@ typedef enum {
     TOKEN_IMPORT,
     TOKEN_MACRO,
     TOKEN_EXPAND,
+    TOKEN_SYNTAX,
     TOKEN_PLUGIN,
     TOKEN_LIBRARY,
     TOKEN_BIND,
@@ -102,6 +103,7 @@ typedef enum {
     VALOR_LISTA,
     VALOR_MAPA,
     VALOR_PONTEIRO,
+    VALOR_SINTAXE,
     VALOR_FUNCAO,
     VALOR_NATIVA
 } TipoValor;
@@ -137,6 +139,7 @@ struct Valor {
         Lista *lista;
         Mapa *mapa;
         void *ponteiro;
+        No *sintaxe;
         FuncaoNoema *funcao;
         FuncaoNativa *nativa;
     } como;
@@ -168,8 +171,12 @@ typedef enum {
     NO_DECL_LET,
     NO_DECL_CONST,
     NO_DECL_FUNCAO,
+    NO_DECL_MACRO,
     NO_FUNCAO_ANONIMA,
     NO_EXPR_STMT,
+    NO_EXPAND,
+    NO_SYNTAX_TEMPLATE,
+    NO_SYNTAX_PLACEHOLDER,
     NO_IF,
     NO_WHILE,
     NO_FOR,
@@ -260,8 +267,27 @@ struct No {
             No *corpo;
         } declaracao_funcao;
         struct {
+            char *nome;
+            char **parametros;
+            int quantidade_parametros;
+            No *corpo;
+        } declaracao_macro;
+        struct {
             No *expressao;
         } expressao;
+        struct {
+            char *nome;
+            No **argumentos;
+            int quantidade_argumentos;
+            int capacidade_argumentos;
+        } expansao_macro;
+        struct {
+            No *corpo;
+        } template_sintaxe;
+        struct {
+            char *nome;
+            No *expressao;
+        } placeholder_sintaxe;
         struct {
             No *condicao;
             No *ramo_entao;
@@ -281,7 +307,8 @@ struct No {
         } retorno;
         struct {
             char *nome;
-            char *biblioteca;
+            char **bibliotecas;
+            int quantidade_bibliotecas;
             LigacaoPluginAst *ligacoes;
             int quantidade_ligacoes;
         } plugin;
@@ -414,6 +441,7 @@ Valor valor_texto(const char *valor);
 Valor valor_lista(Lista *lista);
 Valor valor_mapa(Mapa *mapa);
 Valor valor_ponteiro(void *ponteiro);
+Valor valor_sintaxe(No *sintaxe);
 Valor valor_funcao(FuncaoNoema *funcao);
 Valor valor_nativa(FuncaoNativa *nativa);
 

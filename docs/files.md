@@ -99,9 +99,7 @@ Preprocessador de Noema.
 Responsavel por:
 
 - `import`
-- definicao de `macro`
-- `expand`
-- expansao de placeholders com `$`
+- montagem do codigo apos resolver imports
 
 ### [../src/parser.c](../src/parser.c)
 
@@ -114,6 +112,7 @@ Runtime principal.
 Responsavel por:
 
 - execucao da AST
+- expansao de macros em AST
 - escopo e ambientes
 - valores e coercoes
 - descoberta da stdlib
@@ -139,9 +138,10 @@ Camada de plugins/FFI.
 
 Responsavel por:
 
-- carregar bibliotecas dinamicas
+- carregar bibliotecas dinamicas com fallbacks
 - resolver simbolos
 - preparar chamadas `libffi`
+- viabilizar plugins com buffers e structs simples em conjunto com os helpers de memoria
 
 ## Stdlib
 
@@ -153,7 +153,7 @@ Ponto de entrada da stdlib. Carrega os modulos e expoe `Std`.
 
 ### [../stdlib/core.noe](../stdlib/core.noe)
 
-Helpers basicos, tipos e conversoes.
+Helpers basicos, tipos, conversoes e utilitarios de memoria para FFI.
 
 ### [../stdlib/io.noe](../stdlib/io.noe)
 
@@ -221,11 +221,29 @@ Motores de fatos, inferencia e certeza.
 
 Plugin de exemplo para `ncurses`.
 
+Mostra:
+
+- bibliotecas fallback em `library`
+- `bind` com resolucao implicita do simbolo quando o nome local ja coincide
+
+Plugin de exemplo para `ncurses`.
+
 Observacao:
 
 - e um plugin de usuario
 - nao faz parte da stdlib
 - e especifico de Linux/Unix
+
+### [../plugins/sdl2.noe](../plugins/sdl2.noe)
+
+Plugin de exemplo para `SDL2`.
+
+Mostra:
+
+- bibliotecas fallback multiplataforma
+- funcoes de janela, renderer e polling de eventos
+- constantes e helpers adicionados ao namespace do plugin
+- empacotamento de `SDL_Event` e `SDL_Rect` com os helpers de memoria
 
 ## Exemplos
 
@@ -266,6 +284,16 @@ Demo de flocking e simulacao simples.
 ### [../exemplos/ncurses_demo.noe](../exemplos/ncurses_demo.noe)
 
 Demo isolada do plugin `ncurses`.
+
+### [../exemplos/sdl2_demo.noe](../exemplos/sdl2_demo.noe)
+
+Demo de janela/render loop com `SDL2`.
+
+Mostra:
+
+- init e shutdown de SDL2
+- polling de eventos com buffer nativo
+- renderizacao 2D com `SDL_RenderFillRect`
 
 ## Documentacao
 

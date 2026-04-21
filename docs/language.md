@@ -15,7 +15,8 @@ O runtime e escrito em C. A implementacao em C usa pt-BR; a linguagem usa sintax
 Noema combina:
 
 - sintaxe blocada e infixa
-- preprocessador com `macro`, `import` e `expand`
+- preprocessador para `import`
+- macros em AST via `macro`, `expand` e `syntax`
 - runtime dinamico
 - stdlib embarcada
 - REPL interativo

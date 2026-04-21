@@ -1,0 +1,67 @@
+plugin SDL2 {
+    library "libSDL2-2.0.so.0", "libSDL2.so", "libSDL2-2.0.so", "SDL2.dll"
+    bind init(int) -> int as "SDL_Init"
+    bind quit() -> void as "SDL_Quit"
+    bind get_error() -> string as "SDL_GetError"
+    bind clear_error() -> void as "SDL_ClearError"
+    bind create_window(string, int, int, int, int, int) -> pointer as "SDL_CreateWindow"
+    bind destroy_window(pointer) -> void as "SDL_DestroyWindow"
+    bind create_renderer(pointer, int, int) -> pointer as "SDL_CreateRenderer"
+    bind destroy_renderer(pointer) -> void as "SDL_DestroyRenderer"
+    bind set_render_draw_color(pointer, int, int, int, int) -> int as "SDL_SetRenderDrawColor"
+    bind render_clear(pointer) -> int as "SDL_RenderClear"
+    bind render_present(pointer) -> void as "SDL_RenderPresent"
+    bind render_fill_rect(pointer, pointer) -> int as "SDL_RenderFillRect"
+    bind render_draw_line(pointer, int, int, int, int) -> int as "SDL_RenderDrawLine"
+    bind poll_event(pointer) -> int as "SDL_PollEvent"
+    bind delay(int) -> void as "SDL_Delay"
+    bind get_ticks() -> int as "SDL_GetTicks"
+}
+
+SDL2.INIT_TIMER = 0x00000001
+SDL2.INIT_AUDIO = 0x00000010
+SDL2.INIT_VIDEO = 0x00000020
+SDL2.INIT_EVENTS = 0x00004000
+
+SDL2.WINDOWPOS_CENTERED = 0x2FFF0000
+SDL2.WINDOW_SHOWN = 0x00000004
+SDL2.WINDOW_HIDDEN = 0x00000008
+SDL2.WINDOW_RESIZABLE = 0x00000020
+
+SDL2.RENDERER_SOFTWARE = 0x00000001
+SDL2.RENDERER_ACCELERATED = 0x00000002
+SDL2.RENDERER_PRESENTVSYNC = 0x00000004
+
+SDL2.QUIT = 0x00000100
+SDL2.KEYDOWN = 0x00000300
+SDL2.KEYUP = 0x00000301
+
+SDL2.EVENT_SIZE = 56
+SDL2.RECT_SIZE = 16
+
+function sdl2_make_event() {
+    return memory_alloc(SDL2.EVENT_SIZE)
+}
+
+function sdl2_event_type(event) {
+    return memory_get_u32(event, 0)
+}
+
+function sdl2_rect_set(rect, x, y, w, h) {
+    memory_set_i32(rect, 0, x)
+    memory_set_i32(rect, 4, y)
+    memory_set_i32(rect, 8, w)
+    memory_set_i32(rect, 12, h)
+    return rect
+}
+
+function sdl2_make_rect(x, y, w, h) {
+    let rect = memory_alloc(SDL2.RECT_SIZE)
+    return sdl2_rect_set(rect, x, y, w, h)
+}
+
+SDL2.make_event = sdl2_make_event
+SDL2.event_type = sdl2_event_type
+SDL2.rect_set = sdl2_rect_set
+SDL2.make_rect = sdl2_make_rect
+SDL2.free = memory_free

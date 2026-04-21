@@ -51,7 +51,7 @@ function repl_help(state) {
     }
     print("Type Noema code and press enter.")
     print("Commands: :help, help, :quit, quit, #{state.exit}.")
-    print("Core syntax: var, fn, when, unless, each, macro, expand.")
+    print("Core syntax: var, fn, when, unless, each, macro, expand, syntax.")
     print("Stdlib namespaces: Core, IO, FS, Path, REPL, Shell, Math, Random, Strings, List, Maps, Fn, Assert, Patterns, Dialogue, Rules.")
     return null
 }

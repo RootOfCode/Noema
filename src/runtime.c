@@ -34,6 +34,20 @@ typedef struct NoemaRecuperacao {
     struct NoemaRecuperacao *anterior;
 } NoemaRecuperacao;
 
+typedef struct {
+    char *nome;
+    char **parametros;
+    int quantidade_parametros;
+    No *corpo;
+} MacroExecutavel;
+
+typedef struct AmbienteMacro {
+    struct AmbienteMacro *pai;
+    MacroExecutavel *itens;
+    int quantidade;
+    int capacidade;
+} AmbienteMacro;
+
 static char *g_noema_diretorio_stdlib = NULL;
 static NoemaRecuperacao *g_noema_recuperacao_atual = NULL;
 
@@ -103,6 +117,9 @@ static Valor avaliar_atribuicao(Interpretador *interpretador, Ambiente *ambiente
 static char *valor_para_texto_interno(Valor valor, int profundidade);
 static FuncaoNoema *criar_funcao_noema(No *no, Ambiente *ambiente, const char *nome_padrao);
 static char *interpolar_texto(Interpretador *interpretador, Ambiente *ambiente, const char *texto);
+static No *clonar_no(No *no);
+static char *no_para_texto(No *no);
+static No *expandir_no(Interpretador *interpretador, AmbienteMacro *ambiente_macro, No *no, bool contexto_instrucao);
 
 static void montador_inicializar(MontadorTexto *montador) {
     montador->capacidade = 256;
@@ -193,6 +210,1186 @@ char *noema_formatar(const char *formato, ...) {
     char *saida = noema_vformatar(formato, args);
     va_end(args);
     return saida;
+}
+
+static No *runtime_novo_no(TipoNo tipo, int linha) {
+    No *no = calloc(1, sizeof(No));
+    if (no == NULL) {
+        noema_falhar("memoria insuficiente");
+    }
+    no->tipo = tipo;
+    no->linha = linha;
+    return no;
+}
+
+static bool no_eh_expressao(TipoNo tipo) {
+    switch (tipo) {
+        case NO_LITERAL:
+        case NO_VARIAVEL:
+        case NO_LISTA_LITERAL:
+        case NO_MAPA_LITERAL:
+        case NO_BINARIO:
+        case NO_UNARIO:
+        case NO_CHAMADA:
+        case NO_MEMBRO:
+        case NO_INDICE:
+        case NO_ATRIBUICAO:
+        case NO_FUNCAO_ANONIMA:
+        case NO_EXPAND:
+        case NO_SYNTAX_TEMPLATE:
+        case NO_SYNTAX_PLACEHOLDER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static const char *token_operador_texto(TipoToken operador) {
+    switch (operador) {
+        case TOKEN_MAIS: return "+";
+        case TOKEN_MENOS: return "-";
+        case TOKEN_ASTERISCO: return "*";
+        case TOKEN_BARRA: return "/";
+        case TOKEN_PERCENTUAL: return "%";
+        case TOKEN_IGUAL: return "==";
+        case TOKEN_DIFERENTE: return "!=";
+        case TOKEN_MENOR: return "<";
+        case TOKEN_MENOR_IGUAL: return "<=";
+        case TOKEN_MAIOR: return ">";
+        case TOKEN_MAIOR_IGUAL: return ">=";
+        case TOKEN_AND: return "and";
+        case TOKEN_OR: return "or";
+        case TOKEN_NOT: return "not";
+        default: return "?";
+    }
+}
+
+static void bloco_adicionar_item_runtime(No *bloco, No *item) {
+    if (bloco->como.bloco.quantidade >= bloco->como.bloco.capacidade) {
+        bloco->como.bloco.capacidade = bloco->como.bloco.capacidade == 0 ? 8 : bloco->como.bloco.capacidade * 2;
+        bloco->como.bloco.itens = realloc(bloco->como.bloco.itens,
+                                          (size_t)bloco->como.bloco.capacidade * sizeof(No *));
+        if (bloco->como.bloco.itens == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    bloco->como.bloco.itens[bloco->como.bloco.quantidade++] = item;
+}
+
+static void lista_literal_adicionar_item_runtime(No *lista, No *item) {
+    if (lista->como.lista.quantidade >= lista->como.lista.capacidade) {
+        lista->como.lista.capacidade = lista->como.lista.capacidade == 0 ? 8 : lista->como.lista.capacidade * 2;
+        lista->como.lista.itens = realloc(lista->como.lista.itens,
+                                          (size_t)lista->como.lista.capacidade * sizeof(No *));
+        if (lista->como.lista.itens == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    lista->como.lista.itens[lista->como.lista.quantidade++] = item;
+}
+
+static void mapa_literal_adicionar_item_runtime(No *mapa, const char *chave, No *valor) {
+    if (mapa->como.mapa.quantidade >= mapa->como.mapa.capacidade) {
+        mapa->como.mapa.capacidade = mapa->como.mapa.capacidade == 0 ? 8 : mapa->como.mapa.capacidade * 2;
+        mapa->como.mapa.chaves = realloc(mapa->como.mapa.chaves,
+                                         (size_t)mapa->como.mapa.capacidade * sizeof(char *));
+        mapa->como.mapa.valores = realloc(mapa->como.mapa.valores,
+                                          (size_t)mapa->como.mapa.capacidade * sizeof(No *));
+        if (mapa->como.mapa.chaves == NULL || mapa->como.mapa.valores == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    mapa->como.mapa.chaves[mapa->como.mapa.quantidade] = noema_duplicar(chave);
+    mapa->como.mapa.valores[mapa->como.mapa.quantidade] = valor;
+    mapa->como.mapa.quantidade++;
+}
+
+static void chamada_adicionar_argumento_runtime(No *chamada, No *argumento) {
+    if (chamada->como.chamada.quantidade_argumentos >= chamada->como.chamada.capacidade_argumentos) {
+        chamada->como.chamada.capacidade_argumentos =
+            chamada->como.chamada.capacidade_argumentos == 0 ? 4 : chamada->como.chamada.capacidade_argumentos * 2;
+        chamada->como.chamada.argumentos = realloc(chamada->como.chamada.argumentos,
+                                                   (size_t)chamada->como.chamada.capacidade_argumentos * sizeof(No *));
+        if (chamada->como.chamada.argumentos == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    chamada->como.chamada.argumentos[chamada->como.chamada.quantidade_argumentos++] = argumento;
+}
+
+static void expansao_macro_adicionar_argumento_runtime(No *expansao, No *argumento) {
+    if (expansao->como.expansao_macro.quantidade_argumentos >= expansao->como.expansao_macro.capacidade_argumentos) {
+        expansao->como.expansao_macro.capacidade_argumentos =
+            expansao->como.expansao_macro.capacidade_argumentos == 0 ? 4 : expansao->como.expansao_macro.capacidade_argumentos * 2;
+        expansao->como.expansao_macro.argumentos = realloc(
+            expansao->como.expansao_macro.argumentos,
+            (size_t)expansao->como.expansao_macro.capacidade_argumentos * sizeof(No *));
+        if (expansao->como.expansao_macro.argumentos == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    expansao->como.expansao_macro.argumentos[expansao->como.expansao_macro.quantidade_argumentos++] = argumento;
+}
+
+static char **clonar_lista_textos(char **itens, int quantidade) {
+    if (quantidade <= 0) {
+        return NULL;
+    }
+    char **copia = calloc((size_t)quantidade, sizeof(char *));
+    if (copia == NULL) {
+        noema_falhar("memoria insuficiente");
+    }
+    for (int i = 0; i < quantidade; i++) {
+        copia[i] = noema_duplicar(itens[i]);
+    }
+    return copia;
+}
+
+static Valor clonar_valor_literal(Valor valor) {
+    switch (valor.tipo) {
+        case VALOR_NULO:
+            return valor_nulo();
+        case VALOR_BOOL:
+            return valor_bool(valor.como.booleano);
+        case VALOR_NUMERO:
+            return valor_numero(valor.como.numero);
+        case VALOR_TEXTO:
+            return valor_texto(valor.como.texto);
+        case VALOR_PONTEIRO:
+            return valor_ponteiro(valor.como.ponteiro);
+        case VALOR_SINTAXE:
+            return valor_sintaxe(clonar_no(valor.como.sintaxe));
+        case VALOR_LISTA:
+        case VALOR_MAPA:
+        case VALOR_FUNCAO:
+        case VALOR_NATIVA:
+            return valor;
+    }
+    return valor_nulo();
+}
+
+static No *clonar_no(No *no) {
+    if (no == NULL) {
+        return NULL;
+    }
+
+    No *copia = runtime_novo_no(no->tipo, no->linha);
+    switch (no->tipo) {
+        case NO_BLOCO:
+            for (int i = 0; i < no->como.bloco.quantidade; i++) {
+                bloco_adicionar_item_runtime(copia, clonar_no(no->como.bloco.itens[i]));
+            }
+            break;
+        case NO_LITERAL:
+            copia->como.literal.valor = clonar_valor_literal(no->como.literal.valor);
+            break;
+        case NO_VARIAVEL:
+            copia->como.variavel.nome = noema_duplicar(no->como.variavel.nome);
+            break;
+        case NO_LISTA_LITERAL:
+            for (int i = 0; i < no->como.lista.quantidade; i++) {
+                lista_literal_adicionar_item_runtime(copia, clonar_no(no->como.lista.itens[i]));
+            }
+            break;
+        case NO_MAPA_LITERAL:
+            copia->como.mapa.quantidade = no->como.mapa.quantidade;
+            copia->como.mapa.capacidade = no->como.mapa.quantidade;
+            if (no->como.mapa.quantidade > 0) {
+                copia->como.mapa.chaves = calloc((size_t)no->como.mapa.quantidade, sizeof(char *));
+                copia->como.mapa.valores = calloc((size_t)no->como.mapa.quantidade, sizeof(No *));
+                if (copia->como.mapa.chaves == NULL || copia->como.mapa.valores == NULL) {
+                    noema_falhar("memoria insuficiente");
+                }
+                for (int i = 0; i < no->como.mapa.quantidade; i++) {
+                    copia->como.mapa.chaves[i] = noema_duplicar(no->como.mapa.chaves[i]);
+                    copia->como.mapa.valores[i] = clonar_no(no->como.mapa.valores[i]);
+                }
+            }
+            break;
+        case NO_BINARIO:
+            copia->como.binario.esquerda = clonar_no(no->como.binario.esquerda);
+            copia->como.binario.operador = no->como.binario.operador;
+            copia->como.binario.direita = clonar_no(no->como.binario.direita);
+            break;
+        case NO_UNARIO:
+            copia->como.unario.operador = no->como.unario.operador;
+            copia->como.unario.direita = clonar_no(no->como.unario.direita);
+            break;
+        case NO_CHAMADA:
+            copia->como.chamada.alvo = clonar_no(no->como.chamada.alvo);
+            for (int i = 0; i < no->como.chamada.quantidade_argumentos; i++) {
+                chamada_adicionar_argumento_runtime(copia, clonar_no(no->como.chamada.argumentos[i]));
+            }
+            break;
+        case NO_MEMBRO:
+            copia->como.membro.objeto = clonar_no(no->como.membro.objeto);
+            copia->como.membro.nome = noema_duplicar(no->como.membro.nome);
+            break;
+        case NO_INDICE:
+            copia->como.indice.objeto = clonar_no(no->como.indice.objeto);
+            copia->como.indice.indice = clonar_no(no->como.indice.indice);
+            break;
+        case NO_ATRIBUICAO:
+            copia->como.atribuicao.alvo = clonar_no(no->como.atribuicao.alvo);
+            copia->como.atribuicao.valor = clonar_no(no->como.atribuicao.valor);
+            break;
+        case NO_DECL_LET:
+        case NO_DECL_CONST:
+            copia->como.declaracao_variavel.nome = noema_duplicar(no->como.declaracao_variavel.nome);
+            copia->como.declaracao_variavel.inicializador = clonar_no(no->como.declaracao_variavel.inicializador);
+            break;
+        case NO_DECL_FUNCAO:
+        case NO_FUNCAO_ANONIMA:
+            copia->como.declaracao_funcao.nome =
+                no->como.declaracao_funcao.nome != NULL ? noema_duplicar(no->como.declaracao_funcao.nome) : NULL;
+            copia->como.declaracao_funcao.parametros =
+                clonar_lista_textos(no->como.declaracao_funcao.parametros, no->como.declaracao_funcao.quantidade_parametros);
+            copia->como.declaracao_funcao.quantidade_parametros = no->como.declaracao_funcao.quantidade_parametros;
+            copia->como.declaracao_funcao.corpo = clonar_no(no->como.declaracao_funcao.corpo);
+            break;
+        case NO_DECL_MACRO:
+            copia->como.declaracao_macro.nome = noema_duplicar(no->como.declaracao_macro.nome);
+            copia->como.declaracao_macro.parametros =
+                clonar_lista_textos(no->como.declaracao_macro.parametros, no->como.declaracao_macro.quantidade_parametros);
+            copia->como.declaracao_macro.quantidade_parametros = no->como.declaracao_macro.quantidade_parametros;
+            copia->como.declaracao_macro.corpo = clonar_no(no->como.declaracao_macro.corpo);
+            break;
+        case NO_EXPR_STMT:
+            copia->como.expressao.expressao = clonar_no(no->como.expressao.expressao);
+            break;
+        case NO_EXPAND:
+            copia->como.expansao_macro.nome = noema_duplicar(no->como.expansao_macro.nome);
+            for (int i = 0; i < no->como.expansao_macro.quantidade_argumentos; i++) {
+                expansao_macro_adicionar_argumento_runtime(copia, clonar_no(no->como.expansao_macro.argumentos[i]));
+            }
+            break;
+        case NO_SYNTAX_TEMPLATE:
+            copia->como.template_sintaxe.corpo = clonar_no(no->como.template_sintaxe.corpo);
+            break;
+        case NO_SYNTAX_PLACEHOLDER:
+            copia->como.placeholder_sintaxe.nome =
+                no->como.placeholder_sintaxe.nome != NULL ? noema_duplicar(no->como.placeholder_sintaxe.nome) : NULL;
+            copia->como.placeholder_sintaxe.expressao = clonar_no(no->como.placeholder_sintaxe.expressao);
+            break;
+        case NO_IF:
+            copia->como.condicional.condicao = clonar_no(no->como.condicional.condicao);
+            copia->como.condicional.ramo_entao = clonar_no(no->como.condicional.ramo_entao);
+            copia->como.condicional.ramo_senao = clonar_no(no->como.condicional.ramo_senao);
+            break;
+        case NO_WHILE:
+            copia->como.enquanto.condicao = clonar_no(no->como.enquanto.condicao);
+            copia->como.enquanto.corpo = clonar_no(no->como.enquanto.corpo);
+            break;
+        case NO_FOR:
+            copia->como.para.variavel = noema_duplicar(no->como.para.variavel);
+            copia->como.para.iteravel = clonar_no(no->como.para.iteravel);
+            copia->como.para.corpo = clonar_no(no->como.para.corpo);
+            break;
+        case NO_RETURN:
+            copia->como.retorno.valor = clonar_no(no->como.retorno.valor);
+            break;
+        case NO_BREAK:
+        case NO_CONTINUE:
+            break;
+        case NO_DECL_PLUGIN:
+            copia->como.plugin.nome = noema_duplicar(no->como.plugin.nome);
+            copia->como.plugin.bibliotecas =
+                clonar_lista_textos(no->como.plugin.bibliotecas, no->como.plugin.quantidade_bibliotecas);
+            copia->como.plugin.quantidade_bibliotecas = no->como.plugin.quantidade_bibliotecas;
+            copia->como.plugin.quantidade_ligacoes = no->como.plugin.quantidade_ligacoes;
+            if (no->como.plugin.quantidade_ligacoes > 0) {
+                copia->como.plugin.ligacoes = calloc((size_t)no->como.plugin.quantidade_ligacoes, sizeof(LigacaoPluginAst));
+                if (copia->como.plugin.ligacoes == NULL) {
+                    noema_falhar("memoria insuficiente");
+                }
+                for (int i = 0; i < no->como.plugin.quantidade_ligacoes; i++) {
+                    copia->como.plugin.ligacoes[i].nome_noema = noema_duplicar(no->como.plugin.ligacoes[i].nome_noema);
+                    copia->como.plugin.ligacoes[i].nome_simbolo = noema_duplicar(no->como.plugin.ligacoes[i].nome_simbolo);
+                    copia->como.plugin.ligacoes[i].retorno = no->como.plugin.ligacoes[i].retorno;
+                    copia->como.plugin.ligacoes[i].quantidade_argumentos = no->como.plugin.ligacoes[i].quantidade_argumentos;
+                    if (no->como.plugin.ligacoes[i].quantidade_argumentos > 0) {
+                        copia->como.plugin.ligacoes[i].argumentos =
+                            calloc((size_t)no->como.plugin.ligacoes[i].quantidade_argumentos, sizeof(TipoFfi));
+                        if (copia->como.plugin.ligacoes[i].argumentos == NULL) {
+                            noema_falhar("memoria insuficiente");
+                        }
+                        memcpy(copia->como.plugin.ligacoes[i].argumentos,
+                               no->como.plugin.ligacoes[i].argumentos,
+                               (size_t)no->como.plugin.ligacoes[i].quantidade_argumentos * sizeof(TipoFfi));
+                    }
+                }
+            }
+            break;
+    }
+
+    return copia;
+}
+
+static char *no_para_texto(No *no) {
+    if (no == NULL) {
+        return noema_duplicar("null");
+    }
+
+    MontadorTexto montador;
+    montador_inicializar(&montador);
+
+    switch (no->tipo) {
+        case NO_BLOCO:
+            montador_anexar(&montador, "{");
+            for (int i = 0; i < no->como.bloco.quantidade; i++) {
+                if (i == 0) {
+                    montador_anexar(&montador, "\n");
+                }
+                char *item = no_para_texto(no->como.bloco.itens[i]);
+                montador_anexar(&montador, item);
+                montador_anexar(&montador, "\n");
+            }
+            montador_anexar(&montador, "}");
+            return montador_finalizar(&montador);
+        case NO_LITERAL:
+            return valor_para_texto_interno(no->como.literal.valor, 0);
+        case NO_VARIAVEL:
+            return noema_duplicar(no->como.variavel.nome);
+        case NO_LISTA_LITERAL: {
+            montador_anexar(&montador, "[");
+            for (int i = 0; i < no->como.lista.quantidade; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                char *item = no_para_texto(no->como.lista.itens[i]);
+                montador_anexar(&montador, item);
+            }
+            montador_anexar(&montador, "]");
+            return montador_finalizar(&montador);
+        }
+        case NO_MAPA_LITERAL: {
+            montador_anexar(&montador, "{");
+            for (int i = 0; i < no->como.mapa.quantidade; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                montador_anexar(&montador, no->como.mapa.chaves[i]);
+                montador_anexar(&montador, ": ");
+                char *valor = no_para_texto(no->como.mapa.valores[i]);
+                montador_anexar(&montador, valor);
+            }
+            montador_anexar(&montador, "}");
+            return montador_finalizar(&montador);
+        }
+        case NO_BINARIO: {
+            char *esquerda = no_para_texto(no->como.binario.esquerda);
+            char *direita = no_para_texto(no->como.binario.direita);
+            return noema_formatar("(%s %s %s)", esquerda, token_operador_texto(no->como.binario.operador), direita);
+        }
+        case NO_UNARIO: {
+            char *direita = no_para_texto(no->como.unario.direita);
+            return noema_formatar("(%s %s)", token_operador_texto(no->como.unario.operador), direita);
+        }
+        case NO_CHAMADA: {
+            char *alvo = no_para_texto(no->como.chamada.alvo);
+            montador_anexar(&montador, alvo);
+            montador_anexar(&montador, "(");
+            for (int i = 0; i < no->como.chamada.quantidade_argumentos; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                char *arg = no_para_texto(no->como.chamada.argumentos[i]);
+                montador_anexar(&montador, arg);
+            }
+            montador_anexar(&montador, ")");
+            return montador_finalizar(&montador);
+        }
+        case NO_MEMBRO: {
+            char *objeto = no_para_texto(no->como.membro.objeto);
+            return noema_formatar("%s.%s", objeto, no->como.membro.nome);
+        }
+        case NO_INDICE: {
+            char *objeto = no_para_texto(no->como.indice.objeto);
+            char *indice = no_para_texto(no->como.indice.indice);
+            return noema_formatar("%s[%s]", objeto, indice);
+        }
+        case NO_ATRIBUICAO: {
+            char *alvo = no_para_texto(no->como.atribuicao.alvo);
+            char *valor = no_para_texto(no->como.atribuicao.valor);
+            return noema_formatar("%s = %s", alvo, valor);
+        }
+        case NO_DECL_LET:
+        case NO_DECL_CONST: {
+            const char *palavra = no->tipo == NO_DECL_CONST ? "const" : "var";
+            if (no->como.declaracao_variavel.inicializador == NULL) {
+                return noema_formatar("%s %s", palavra, no->como.declaracao_variavel.nome);
+            }
+            char *init = no_para_texto(no->como.declaracao_variavel.inicializador);
+            return noema_formatar("%s %s = %s", palavra, no->como.declaracao_variavel.nome, init);
+        }
+        case NO_DECL_FUNCAO:
+        case NO_FUNCAO_ANONIMA: {
+            montador_anexar(&montador, "fn");
+            if (no->como.declaracao_funcao.nome != NULL) {
+                montador_anexar(&montador, " ");
+                montador_anexar(&montador, no->como.declaracao_funcao.nome);
+            }
+            montador_anexar(&montador, "(");
+            for (int i = 0; i < no->como.declaracao_funcao.quantidade_parametros; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                montador_anexar(&montador, no->como.declaracao_funcao.parametros[i]);
+            }
+            montador_anexar(&montador, ") ");
+            char *corpo = no_para_texto(no->como.declaracao_funcao.corpo);
+            montador_anexar(&montador, corpo);
+            return montador_finalizar(&montador);
+        }
+        case NO_DECL_MACRO: {
+            montador_anexar(&montador, "macro ");
+            montador_anexar(&montador, no->como.declaracao_macro.nome);
+            montador_anexar(&montador, "(");
+            for (int i = 0; i < no->como.declaracao_macro.quantidade_parametros; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                montador_anexar(&montador, no->como.declaracao_macro.parametros[i]);
+            }
+            montador_anexar(&montador, ") ");
+            char *corpo = no_para_texto(no->como.declaracao_macro.corpo);
+            montador_anexar(&montador, corpo);
+            return montador_finalizar(&montador);
+        }
+        case NO_EXPR_STMT:
+            return no_para_texto(no->como.expressao.expressao);
+        case NO_EXPAND: {
+            montador_anexar(&montador, "expand ");
+            montador_anexar(&montador, no->como.expansao_macro.nome);
+            montador_anexar(&montador, "(");
+            for (int i = 0; i < no->como.expansao_macro.quantidade_argumentos; i++) {
+                if (i > 0) {
+                    montador_anexar(&montador, ", ");
+                }
+                char *arg = no_para_texto(no->como.expansao_macro.argumentos[i]);
+                montador_anexar(&montador, arg);
+            }
+            montador_anexar(&montador, ")");
+            return montador_finalizar(&montador);
+        }
+        case NO_SYNTAX_TEMPLATE: {
+            char *corpo = no_para_texto(no->como.template_sintaxe.corpo);
+            return noema_formatar("syntax %s", corpo);
+        }
+        case NO_SYNTAX_PLACEHOLDER:
+            if (no->como.placeholder_sintaxe.nome != NULL) {
+                return noema_formatar("$%s", no->como.placeholder_sintaxe.nome);
+            }
+            return noema_formatar("$(%s)", no_para_texto(no->como.placeholder_sintaxe.expressao));
+        case NO_IF: {
+            char *condicao = no_para_texto(no->como.condicional.condicao);
+            char *entao = no_para_texto(no->como.condicional.ramo_entao);
+            if (no->como.condicional.ramo_senao == NULL) {
+                return noema_formatar("if %s %s", condicao, entao);
+            }
+            char *senao = no_para_texto(no->como.condicional.ramo_senao);
+            return noema_formatar("if %s %s else %s", condicao, entao, senao);
+        }
+        case NO_WHILE: {
+            char *condicao = no_para_texto(no->como.enquanto.condicao);
+            char *corpo = no_para_texto(no->como.enquanto.corpo);
+            return noema_formatar("while %s %s", condicao, corpo);
+        }
+        case NO_FOR: {
+            char *iteravel = no_para_texto(no->como.para.iteravel);
+            char *corpo = no_para_texto(no->como.para.corpo);
+            return noema_formatar("each %s in %s %s", no->como.para.variavel, iteravel, corpo);
+        }
+        case NO_RETURN:
+            if (no->como.retorno.valor == NULL) {
+                return noema_duplicar("return");
+            }
+            return noema_formatar("return %s", no_para_texto(no->como.retorno.valor));
+        case NO_BREAK:
+            return noema_duplicar("break");
+        case NO_CONTINUE:
+            return noema_duplicar("continue");
+        case NO_DECL_PLUGIN:
+            montador_anexar(&montador, "plugin ");
+            montador_anexar(&montador, no->como.plugin.nome);
+            montador_anexar(&montador, " {\n");
+            for (int i = 0; i < no->como.plugin.quantidade_bibliotecas; i++) {
+                montador_anexar(&montador, "library \"");
+                montador_anexar(&montador, no->como.plugin.bibliotecas[i]);
+                montador_anexar(&montador, "\"\n");
+            }
+            for (int i = 0; i < no->como.plugin.quantidade_ligacoes; i++) {
+                montador_anexar(&montador, "bind ");
+                montador_anexar(&montador, no->como.plugin.ligacoes[i].nome_noema);
+                montador_anexar(&montador, "(...)");
+                montador_anexar(&montador, "\n");
+            }
+            montador_anexar(&montador, "}");
+            return montador_finalizar(&montador);
+    }
+
+    return noema_duplicar("<syntax>");
+}
+
+static void ambiente_macro_inicializar(AmbienteMacro *ambiente, AmbienteMacro *pai) {
+    memset(ambiente, 0, sizeof(*ambiente));
+    ambiente->pai = pai;
+}
+
+static MacroExecutavel *ambiente_macro_buscar(AmbienteMacro *ambiente, const char *nome) {
+    for (AmbienteMacro *cursor = ambiente; cursor != NULL; cursor = cursor->pai) {
+        for (int i = 0; i < cursor->quantidade; i++) {
+            if (strcmp(cursor->itens[i].nome, nome) == 0) {
+                return &cursor->itens[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+static void ambiente_macro_registrar(AmbienteMacro *ambiente, No *macro) {
+    for (int i = 0; i < ambiente->quantidade; i++) {
+        if (strcmp(ambiente->itens[i].nome, macro->como.declaracao_macro.nome) == 0) {
+            ambiente->itens[i].parametros = macro->como.declaracao_macro.parametros;
+            ambiente->itens[i].quantidade_parametros = macro->como.declaracao_macro.quantidade_parametros;
+            ambiente->itens[i].corpo = macro->como.declaracao_macro.corpo;
+            return;
+        }
+    }
+
+    if (ambiente->quantidade >= ambiente->capacidade) {
+        ambiente->capacidade = ambiente->capacidade == 0 ? 8 : ambiente->capacidade * 2;
+        ambiente->itens = realloc(ambiente->itens, (size_t)ambiente->capacidade * sizeof(MacroExecutavel));
+        if (ambiente->itens == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+
+    MacroExecutavel *item = &ambiente->itens[ambiente->quantidade++];
+    item->nome = macro->como.declaracao_macro.nome;
+    item->parametros = macro->como.declaracao_macro.parametros;
+    item->quantidade_parametros = macro->como.declaracao_macro.quantidade_parametros;
+    item->corpo = macro->como.declaracao_macro.corpo;
+}
+
+static No *garantir_no_expressao(No *no, const char *contexto) {
+    if (no == NULL || !no_eh_expressao(no->tipo)) {
+        noema_falhar("%s exige uma expressao de sintaxe", contexto);
+    }
+    return no;
+}
+
+static Valor avaliar_placeholder_sintaxe(Interpretador *interpretador, Ambiente *ambiente, No *placeholder) {
+    if (placeholder->como.placeholder_sintaxe.nome != NULL) {
+        Valor valor;
+        if (!ambiente_obter(ambiente, placeholder->como.placeholder_sintaxe.nome, &valor)) {
+            noema_falhar("placeholder '$%s' nao esta definido", placeholder->como.placeholder_sintaxe.nome);
+        }
+        return valor;
+    }
+    return avaliar(interpretador, ambiente, placeholder->como.placeholder_sintaxe.expressao);
+}
+
+static No *valor_para_no_sintaxe(Valor valor, int linha) {
+    switch (valor.tipo) {
+        case VALOR_SINTAXE:
+            return clonar_no(valor.como.sintaxe);
+        case VALOR_NULO:
+        case VALOR_BOOL:
+        case VALOR_NUMERO:
+        case VALOR_TEXTO: {
+            No *literal = runtime_novo_no(NO_LITERAL, linha);
+            literal->como.literal.valor = clonar_valor_literal(valor);
+            return literal;
+        }
+        case VALOR_LISTA: {
+            No *lista = runtime_novo_no(NO_LISTA_LITERAL, linha);
+            for (int i = 0; i < valor.como.lista->quantidade; i++) {
+                lista_literal_adicionar_item_runtime(lista,
+                                                    valor_para_no_sintaxe(valor.como.lista->itens[i], linha));
+            }
+            return lista;
+        }
+        case VALOR_MAPA: {
+            No *mapa = runtime_novo_no(NO_MAPA_LITERAL, linha);
+            for (int i = 0; i < valor.como.mapa->quantidade; i++) {
+                mapa_literal_adicionar_item_runtime(mapa,
+                                                   valor.como.mapa->entradas[i].chave,
+                                                   valor_para_no_sintaxe(valor.como.mapa->entradas[i].valor, linha));
+            }
+            return mapa;
+        }
+        default:
+            noema_falhar("nao foi possivel converter %s em sintaxe", valor_tipo_nome(valor));
+    }
+    return NULL;
+}
+
+static No *normalizar_no_para_instrucao(No *no, int linha) {
+    if (no == NULL) {
+        return NULL;
+    }
+    if (no_eh_expressao(no->tipo)) {
+        No *stmt = runtime_novo_no(NO_EXPR_STMT, linha);
+        stmt->como.expressao.expressao = no;
+        return stmt;
+    }
+    return no;
+}
+
+static No *valor_para_no_instrucao(Valor valor, int linha) {
+    if (valor.tipo == VALOR_LISTA) {
+        No *bloco = runtime_novo_no(NO_BLOCO, linha);
+        for (int i = 0; i < valor.como.lista->quantidade; i++) {
+            No *item = valor_para_no_sintaxe(valor.como.lista->itens[i], linha);
+            bloco_adicionar_item_runtime(bloco, normalizar_no_para_instrucao(item, linha));
+        }
+        return bloco;
+    }
+    return normalizar_no_para_instrucao(valor_para_no_sintaxe(valor, linha), linha);
+}
+
+static bool no_expr_stmt_placeholder(No *no, No **placeholder) {
+    if (no != NULL &&
+        no->tipo == NO_EXPR_STMT &&
+        no->como.expressao.expressao != NULL &&
+        no->como.expressao.expressao->tipo == NO_SYNTAX_PLACEHOLDER) {
+        if (placeholder != NULL) {
+            *placeholder = no->como.expressao.expressao;
+        }
+        return true;
+    }
+    return false;
+}
+
+static No *avaliar_template_sintaxe_no(Interpretador *interpretador, Ambiente *ambiente, No *no);
+
+static void template_adicionar_item_bloco(Interpretador *interpretador, Ambiente *ambiente, No *bloco, No *item) {
+    No *placeholder = NULL;
+    if (no_expr_stmt_placeholder(item, &placeholder)) {
+        Valor valor = avaliar_placeholder_sintaxe(interpretador, ambiente, placeholder);
+        if (valor.tipo == VALOR_SINTAXE && valor.como.sintaxe != NULL && valor.como.sintaxe->tipo == NO_BLOCO) {
+            for (int i = 0; i < valor.como.sintaxe->como.bloco.quantidade; i++) {
+                No *filho = clonar_no(valor.como.sintaxe->como.bloco.itens[i]);
+                bloco_adicionar_item_runtime(bloco, normalizar_no_para_instrucao(filho, item->linha));
+            }
+            return;
+        }
+        if (valor.tipo == VALOR_LISTA) {
+            for (int i = 0; i < valor.como.lista->quantidade; i++) {
+                No *filho = valor_para_no_sintaxe(valor.como.lista->itens[i], item->linha);
+                bloco_adicionar_item_runtime(bloco, normalizar_no_para_instrucao(filho, item->linha));
+            }
+            return;
+        }
+        bloco_adicionar_item_runtime(bloco, valor_para_no_instrucao(valor, item->linha));
+        return;
+    }
+
+    No *expandido = avaliar_template_sintaxe_no(interpretador, ambiente, item);
+    bloco_adicionar_item_runtime(bloco, normalizar_no_para_instrucao(expandido, item->linha));
+}
+
+static void template_adicionar_item_lista(Interpretador *interpretador, Ambiente *ambiente, No *lista, No *item) {
+    if (item->tipo == NO_SYNTAX_PLACEHOLDER) {
+        Valor valor = avaliar_placeholder_sintaxe(interpretador, ambiente, item);
+        if (valor.tipo == VALOR_SINTAXE && valor.como.sintaxe != NULL && valor.como.sintaxe->tipo == NO_LISTA_LITERAL) {
+            for (int i = 0; i < valor.como.sintaxe->como.lista.quantidade; i++) {
+                No *filho = clonar_no(valor.como.sintaxe->como.lista.itens[i]);
+                lista_literal_adicionar_item_runtime(lista, garantir_no_expressao(filho, "placeholder em lista"));
+            }
+            return;
+        }
+        if (valor.tipo == VALOR_LISTA) {
+            for (int i = 0; i < valor.como.lista->quantidade; i++) {
+                No *filho = valor_para_no_sintaxe(valor.como.lista->itens[i], item->linha);
+                lista_literal_adicionar_item_runtime(lista, garantir_no_expressao(filho, "placeholder em lista"));
+            }
+            return;
+        }
+        lista_literal_adicionar_item_runtime(lista,
+                                             garantir_no_expressao(valor_para_no_sintaxe(valor, item->linha),
+                                                                   "placeholder em lista"));
+        return;
+    }
+
+    lista_literal_adicionar_item_runtime(lista,
+                                         garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, item),
+                                                               "item de lista"));
+}
+
+static void template_adicionar_argumento_chamada(Interpretador *interpretador, Ambiente *ambiente, No *chamada, No *arg) {
+    if (arg->tipo == NO_SYNTAX_PLACEHOLDER) {
+        Valor valor = avaliar_placeholder_sintaxe(interpretador, ambiente, arg);
+        if (valor.tipo == VALOR_SINTAXE && valor.como.sintaxe != NULL && valor.como.sintaxe->tipo == NO_LISTA_LITERAL) {
+            for (int i = 0; i < valor.como.sintaxe->como.lista.quantidade; i++) {
+                No *filho = clonar_no(valor.como.sintaxe->como.lista.itens[i]);
+                chamada_adicionar_argumento_runtime(chamada, garantir_no_expressao(filho, "placeholder em chamada"));
+            }
+            return;
+        }
+        if (valor.tipo == VALOR_LISTA) {
+            for (int i = 0; i < valor.como.lista->quantidade; i++) {
+                No *filho = valor_para_no_sintaxe(valor.como.lista->itens[i], arg->linha);
+                chamada_adicionar_argumento_runtime(chamada, garantir_no_expressao(filho, "placeholder em chamada"));
+            }
+            return;
+        }
+        chamada_adicionar_argumento_runtime(chamada,
+                                            garantir_no_expressao(valor_para_no_sintaxe(valor, arg->linha),
+                                                                  "placeholder em chamada"));
+        return;
+    }
+
+    chamada_adicionar_argumento_runtime(
+        chamada,
+        garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, arg), "argumento de chamada"));
+}
+
+static No *avaliar_template_sintaxe_no(Interpretador *interpretador, Ambiente *ambiente, No *no) {
+    if (no == NULL) {
+        return NULL;
+    }
+
+    switch (no->tipo) {
+        case NO_BLOCO: {
+            No *bloco = runtime_novo_no(NO_BLOCO, no->linha);
+            for (int i = 0; i < no->como.bloco.quantidade; i++) {
+                template_adicionar_item_bloco(interpretador, ambiente, bloco, no->como.bloco.itens[i]);
+            }
+            return bloco;
+        }
+        case NO_LITERAL:
+        case NO_VARIAVEL:
+        case NO_SYNTAX_TEMPLATE:
+            return clonar_no(no);
+        case NO_LISTA_LITERAL: {
+            No *lista = runtime_novo_no(NO_LISTA_LITERAL, no->linha);
+            for (int i = 0; i < no->como.lista.quantidade; i++) {
+                template_adicionar_item_lista(interpretador, ambiente, lista, no->como.lista.itens[i]);
+            }
+            return lista;
+        }
+        case NO_MAPA_LITERAL: {
+            No *mapa = runtime_novo_no(NO_MAPA_LITERAL, no->linha);
+            for (int i = 0; i < no->como.mapa.quantidade; i++) {
+                mapa_literal_adicionar_item_runtime(mapa,
+                                                   no->como.mapa.chaves[i],
+                                                   garantir_no_expressao(
+                                                       avaliar_template_sintaxe_no(interpretador,
+                                                                                   ambiente,
+                                                                                   no->como.mapa.valores[i]),
+                                                       "valor de mapa"));
+            }
+            return mapa;
+        }
+        case NO_BINARIO: {
+            No *copia = runtime_novo_no(NO_BINARIO, no->linha);
+            copia->como.binario.operador = no->como.binario.operador;
+            copia->como.binario.esquerda =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.binario.esquerda),
+                                      "operando esquerdo");
+            copia->como.binario.direita =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.binario.direita),
+                                      "operando direito");
+            return copia;
+        }
+        case NO_UNARIO: {
+            No *copia = runtime_novo_no(NO_UNARIO, no->linha);
+            copia->como.unario.operador = no->como.unario.operador;
+            copia->como.unario.direita =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.unario.direita),
+                                      "operando unario");
+            return copia;
+        }
+        case NO_CHAMADA: {
+            No *copia = runtime_novo_no(NO_CHAMADA, no->linha);
+            copia->como.chamada.alvo =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.chamada.alvo),
+                                      "alvo de chamada");
+            for (int i = 0; i < no->como.chamada.quantidade_argumentos; i++) {
+                template_adicionar_argumento_chamada(interpretador, ambiente, copia, no->como.chamada.argumentos[i]);
+            }
+            return copia;
+        }
+        case NO_MEMBRO: {
+            No *copia = runtime_novo_no(NO_MEMBRO, no->linha);
+            copia->como.membro.objeto =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.membro.objeto),
+                                      "objeto de membro");
+            copia->como.membro.nome = noema_duplicar(no->como.membro.nome);
+            return copia;
+        }
+        case NO_INDICE: {
+            No *copia = runtime_novo_no(NO_INDICE, no->linha);
+            copia->como.indice.objeto =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.indice.objeto),
+                                      "objeto de indice");
+            copia->como.indice.indice =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.indice.indice),
+                                      "indice");
+            return copia;
+        }
+        case NO_ATRIBUICAO: {
+            No *copia = runtime_novo_no(NO_ATRIBUICAO, no->linha);
+            copia->como.atribuicao.alvo =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.atribuicao.alvo),
+                                      "alvo de atribuicao");
+            copia->como.atribuicao.valor =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.atribuicao.valor),
+                                      "valor de atribuicao");
+            return copia;
+        }
+        case NO_DECL_LET:
+        case NO_DECL_CONST: {
+            No *copia = runtime_novo_no(no->tipo, no->linha);
+            copia->como.declaracao_variavel.nome = noema_duplicar(no->como.declaracao_variavel.nome);
+            copia->como.declaracao_variavel.inicializador =
+                no->como.declaracao_variavel.inicializador != NULL
+                    ? garantir_no_expressao(
+                          avaliar_template_sintaxe_no(interpretador,
+                                                      ambiente,
+                                                      no->como.declaracao_variavel.inicializador),
+                          "inicializador")
+                    : NULL;
+            return copia;
+        }
+        case NO_DECL_FUNCAO:
+        case NO_FUNCAO_ANONIMA: {
+            No *copia = runtime_novo_no(no->tipo, no->linha);
+            copia->como.declaracao_funcao.nome =
+                no->como.declaracao_funcao.nome != NULL ? noema_duplicar(no->como.declaracao_funcao.nome) : NULL;
+            copia->como.declaracao_funcao.parametros =
+                clonar_lista_textos(no->como.declaracao_funcao.parametros, no->como.declaracao_funcao.quantidade_parametros);
+            copia->como.declaracao_funcao.quantidade_parametros = no->como.declaracao_funcao.quantidade_parametros;
+            copia->como.declaracao_funcao.corpo = avaliar_template_sintaxe_no(interpretador,
+                                                                               ambiente,
+                                                                               no->como.declaracao_funcao.corpo);
+            return copia;
+        }
+        case NO_DECL_MACRO: {
+            No *copia = runtime_novo_no(NO_DECL_MACRO, no->linha);
+            copia->como.declaracao_macro.nome = noema_duplicar(no->como.declaracao_macro.nome);
+            copia->como.declaracao_macro.parametros =
+                clonar_lista_textos(no->como.declaracao_macro.parametros, no->como.declaracao_macro.quantidade_parametros);
+            copia->como.declaracao_macro.quantidade_parametros = no->como.declaracao_macro.quantidade_parametros;
+            copia->como.declaracao_macro.corpo =
+                avaliar_template_sintaxe_no(interpretador, ambiente, no->como.declaracao_macro.corpo);
+            return copia;
+        }
+        case NO_EXPR_STMT: {
+            if (no->como.expressao.expressao != NULL &&
+                no->como.expressao.expressao->tipo == NO_SYNTAX_PLACEHOLDER) {
+                Valor valor = avaliar_placeholder_sintaxe(interpretador, ambiente, no->como.expressao.expressao);
+                return valor_para_no_instrucao(valor, no->linha);
+            }
+            No *stmt = runtime_novo_no(NO_EXPR_STMT, no->linha);
+            stmt->como.expressao.expressao =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador,
+                                                                  ambiente,
+                                                                  no->como.expressao.expressao),
+                                      "instrucao de expressao");
+            return stmt;
+        }
+        case NO_EXPAND: {
+            No *copia = runtime_novo_no(NO_EXPAND, no->linha);
+            copia->como.expansao_macro.nome = noema_duplicar(no->como.expansao_macro.nome);
+            for (int i = 0; i < no->como.expansao_macro.quantidade_argumentos; i++) {
+                expansao_macro_adicionar_argumento_runtime(
+                    copia,
+                    avaliar_template_sintaxe_no(interpretador, ambiente, no->como.expansao_macro.argumentos[i]));
+            }
+            return copia;
+        }
+        case NO_SYNTAX_PLACEHOLDER:
+            return valor_para_no_sintaxe(avaliar_placeholder_sintaxe(interpretador, ambiente, no), no->linha);
+        case NO_IF: {
+            No *copia = runtime_novo_no(NO_IF, no->linha);
+            copia->como.condicional.condicao =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.condicional.condicao),
+                                      "condicao");
+            copia->como.condicional.ramo_entao =
+                avaliar_template_sintaxe_no(interpretador, ambiente, no->como.condicional.ramo_entao);
+            copia->como.condicional.ramo_senao =
+                avaliar_template_sintaxe_no(interpretador, ambiente, no->como.condicional.ramo_senao);
+            return copia;
+        }
+        case NO_WHILE: {
+            No *copia = runtime_novo_no(NO_WHILE, no->linha);
+            copia->como.enquanto.condicao =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.enquanto.condicao),
+                                      "condicao do while");
+            copia->como.enquanto.corpo = avaliar_template_sintaxe_no(interpretador, ambiente, no->como.enquanto.corpo);
+            return copia;
+        }
+        case NO_FOR: {
+            No *copia = runtime_novo_no(NO_FOR, no->linha);
+            copia->como.para.variavel = noema_duplicar(no->como.para.variavel);
+            copia->como.para.iteravel =
+                garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.para.iteravel),
+                                      "iteravel do for");
+            copia->como.para.corpo = avaliar_template_sintaxe_no(interpretador, ambiente, no->como.para.corpo);
+            return copia;
+        }
+        case NO_RETURN: {
+            No *copia = runtime_novo_no(NO_RETURN, no->linha);
+            copia->como.retorno.valor =
+                no->como.retorno.valor != NULL
+                    ? garantir_no_expressao(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.retorno.valor),
+                                            "valor de retorno")
+                    : NULL;
+            return copia;
+        }
+        case NO_BREAK:
+        case NO_CONTINUE:
+        case NO_DECL_PLUGIN:
+            return clonar_no(no);
+    }
+
+    return clonar_no(no);
+}
+
+static No *expandir_invocacao_macro(Interpretador *interpretador,
+                                    AmbienteMacro *ambiente_macro,
+                                    const char *nome,
+                                    No **argumentos,
+                                    int quantidade_argumentos,
+                                    int linha,
+                                    bool contexto_instrucao) {
+    MacroExecutavel *macro = ambiente_macro_buscar(ambiente_macro, nome);
+    if (macro == NULL) {
+        noema_falhar("macro indefinida: %s", nome);
+    }
+    if (quantidade_argumentos != macro->quantidade_parametros) {
+        noema_falhar("macro '%s' esperava %d argumentos e recebeu %d",
+                     nome,
+                     macro->quantidade_parametros,
+                     quantidade_argumentos);
+    }
+
+    Ambiente *local = ambiente_criar(interpretador->global);
+    for (int i = 0; i < macro->quantidade_parametros; i++) {
+        ambiente_definir(local, macro->parametros[i], valor_sintaxe(clonar_no(argumentos[i])), false);
+    }
+
+    ResultadoExecucao resultado = executar(interpretador, local, macro->corpo);
+    if (resultado.sinal == EXEC_BREAK || resultado.sinal == EXEC_CONTINUE) {
+        noema_falhar("macro '%s' nao pode usar break/continue no topo", nome);
+    }
+
+    Valor valor = resultado.valor;
+    if (resultado.sinal == EXEC_RETURN) {
+        valor = resultado.valor;
+    }
+    if (valor.tipo != VALOR_SINTAXE) {
+        noema_falhar("macro '%s' precisa retornar syntax", nome);
+    }
+
+    No *expandido = expandir_no(interpretador, ambiente_macro, clonar_no(valor.como.sintaxe), contexto_instrucao);
+    if (expandido == NULL) {
+        if (contexto_instrucao) {
+            return NULL;
+        }
+        noema_falhar("macro '%s' precisa expandir para uma expressao", nome);
+    }
+    if (!contexto_instrucao && !no_eh_expressao(expandido->tipo)) {
+        noema_falhar("macro '%s' precisa expandir para uma expressao", nome);
+    }
+    (void)linha;
+    return expandido;
+}
+
+static No *expandir_em_contexto_expressao(Interpretador *interpretador,
+                                          AmbienteMacro *ambiente_macro,
+                                          No *no,
+                                          const char *contexto) {
+    No *expandido = expandir_no(interpretador, ambiente_macro, no, false);
+    return garantir_no_expressao(expandido, contexto);
+}
+
+static No *expandir_no(Interpretador *interpretador, AmbienteMacro *ambiente_macro, No *no, bool contexto_instrucao) {
+    if (no == NULL) {
+        return NULL;
+    }
+
+    switch (no->tipo) {
+        case NO_BLOCO: {
+            AmbienteMacro local;
+            ambiente_macro_inicializar(&local, ambiente_macro);
+            No *bloco = runtime_novo_no(NO_BLOCO, no->linha);
+            for (int i = 0; i < no->como.bloco.quantidade; i++) {
+                No *item = expandir_no(interpretador, &local, no->como.bloco.itens[i], true);
+                if (item != NULL) {
+                    bloco_adicionar_item_runtime(bloco, item);
+                }
+            }
+            return bloco;
+        }
+        case NO_LITERAL:
+        case NO_VARIAVEL:
+        case NO_DECL_PLUGIN:
+        case NO_SYNTAX_TEMPLATE:
+            return clonar_no(no);
+        case NO_LISTA_LITERAL: {
+            No *lista = runtime_novo_no(NO_LISTA_LITERAL, no->linha);
+            for (int i = 0; i < no->como.lista.quantidade; i++) {
+                lista_literal_adicionar_item_runtime(
+                    lista,
+                    expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.lista.itens[i], "item de lista"));
+            }
+            return lista;
+        }
+        case NO_MAPA_LITERAL: {
+            No *mapa = runtime_novo_no(NO_MAPA_LITERAL, no->linha);
+            for (int i = 0; i < no->como.mapa.quantidade; i++) {
+                mapa_literal_adicionar_item_runtime(
+                    mapa,
+                    no->como.mapa.chaves[i],
+                    expandir_em_contexto_expressao(
+                        interpretador, ambiente_macro, no->como.mapa.valores[i], "valor de mapa"));
+            }
+            return mapa;
+        }
+        case NO_BINARIO: {
+            No *copia = runtime_novo_no(NO_BINARIO, no->linha);
+            copia->como.binario.operador = no->como.binario.operador;
+            copia->como.binario.esquerda =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.binario.esquerda, "operando esquerdo");
+            copia->como.binario.direita =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.binario.direita, "operando direito");
+            return copia;
+        }
+        case NO_UNARIO: {
+            No *copia = runtime_novo_no(NO_UNARIO, no->linha);
+            copia->como.unario.operador = no->como.unario.operador;
+            copia->como.unario.direita =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.unario.direita, "operando unario");
+            return copia;
+        }
+        case NO_CHAMADA: {
+            No *copia = runtime_novo_no(NO_CHAMADA, no->linha);
+            copia->como.chamada.alvo =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.chamada.alvo, "alvo de chamada");
+            for (int i = 0; i < no->como.chamada.quantidade_argumentos; i++) {
+                chamada_adicionar_argumento_runtime(
+                    copia,
+                    expandir_em_contexto_expressao(
+                        interpretador, ambiente_macro, no->como.chamada.argumentos[i], "argumento de chamada"));
+            }
+            return copia;
+        }
+        case NO_MEMBRO: {
+            No *copia = runtime_novo_no(NO_MEMBRO, no->linha);
+            copia->como.membro.objeto =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.membro.objeto, "objeto de membro");
+            copia->como.membro.nome = noema_duplicar(no->como.membro.nome);
+            return copia;
+        }
+        case NO_INDICE: {
+            No *copia = runtime_novo_no(NO_INDICE, no->linha);
+            copia->como.indice.objeto =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.indice.objeto, "objeto de indice");
+            copia->como.indice.indice =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.indice.indice, "indice");
+            return copia;
+        }
+        case NO_ATRIBUICAO: {
+            No *copia = runtime_novo_no(NO_ATRIBUICAO, no->linha);
+            copia->como.atribuicao.alvo =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.atribuicao.alvo, "alvo de atribuicao");
+            copia->como.atribuicao.valor =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.atribuicao.valor, "valor de atribuicao");
+            return copia;
+        }
+        case NO_DECL_LET:
+        case NO_DECL_CONST: {
+            No *copia = runtime_novo_no(no->tipo, no->linha);
+            copia->como.declaracao_variavel.nome = noema_duplicar(no->como.declaracao_variavel.nome);
+            copia->como.declaracao_variavel.inicializador =
+                no->como.declaracao_variavel.inicializador != NULL
+                    ? expandir_em_contexto_expressao(
+                          interpretador, ambiente_macro, no->como.declaracao_variavel.inicializador, "inicializador")
+                    : NULL;
+            return copia;
+        }
+        case NO_DECL_FUNCAO:
+        case NO_FUNCAO_ANONIMA: {
+            No *copia = runtime_novo_no(no->tipo, no->linha);
+            copia->como.declaracao_funcao.nome =
+                no->como.declaracao_funcao.nome != NULL ? noema_duplicar(no->como.declaracao_funcao.nome) : NULL;
+            copia->como.declaracao_funcao.parametros =
+                clonar_lista_textos(no->como.declaracao_funcao.parametros, no->como.declaracao_funcao.quantidade_parametros);
+            copia->como.declaracao_funcao.quantidade_parametros = no->como.declaracao_funcao.quantidade_parametros;
+            copia->como.declaracao_funcao.corpo =
+                expandir_no(interpretador, ambiente_macro, no->como.declaracao_funcao.corpo, true);
+            return copia;
+        }
+        case NO_DECL_MACRO:
+            ambiente_macro_registrar(ambiente_macro, no);
+            return NULL;
+        case NO_EXPR_STMT: {
+            No *expandido = expandir_no(interpretador, ambiente_macro, no->como.expressao.expressao, true);
+            if (expandido == NULL) {
+                return NULL;
+            }
+            if (no_eh_expressao(expandido->tipo)) {
+                No *stmt = runtime_novo_no(NO_EXPR_STMT, no->linha);
+                stmt->como.expressao.expressao = expandido;
+                return stmt;
+            }
+            return expandido;
+        }
+        case NO_EXPAND:
+            return expandir_invocacao_macro(interpretador,
+                                            ambiente_macro,
+                                            no->como.expansao_macro.nome,
+                                            no->como.expansao_macro.argumentos,
+                                            no->como.expansao_macro.quantidade_argumentos,
+                                            no->linha,
+                                            contexto_instrucao);
+        case NO_SYNTAX_PLACEHOLDER:
+            noema_falhar("placeholder de sintaxe fora de syntax");
+            return NULL;
+        case NO_IF: {
+            No *copia = runtime_novo_no(NO_IF, no->linha);
+            copia->como.condicional.condicao =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.condicional.condicao, "condicao");
+            copia->como.condicional.ramo_entao =
+                expandir_no(interpretador, ambiente_macro, no->como.condicional.ramo_entao, true);
+            copia->como.condicional.ramo_senao =
+                expandir_no(interpretador, ambiente_macro, no->como.condicional.ramo_senao, true);
+            return copia;
+        }
+        case NO_WHILE: {
+            No *copia = runtime_novo_no(NO_WHILE, no->linha);
+            copia->como.enquanto.condicao =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.enquanto.condicao, "condicao do while");
+            copia->como.enquanto.corpo = expandir_no(interpretador, ambiente_macro, no->como.enquanto.corpo, true);
+            return copia;
+        }
+        case NO_FOR: {
+            No *copia = runtime_novo_no(NO_FOR, no->linha);
+            copia->como.para.variavel = noema_duplicar(no->como.para.variavel);
+            copia->como.para.iteravel =
+                expandir_em_contexto_expressao(interpretador, ambiente_macro, no->como.para.iteravel, "iteravel do for");
+            copia->como.para.corpo = expandir_no(interpretador, ambiente_macro, no->como.para.corpo, true);
+            return copia;
+        }
+        case NO_RETURN: {
+            No *copia = runtime_novo_no(NO_RETURN, no->linha);
+            copia->como.retorno.valor =
+                no->como.retorno.valor != NULL
+                    ? expandir_em_contexto_expressao(
+                          interpretador, ambiente_macro, no->como.retorno.valor, "valor de retorno")
+                    : NULL;
+            return copia;
+        }
+        case NO_BREAK:
+        case NO_CONTINUE:
+            return clonar_no(no);
+    }
+
+    return clonar_no(no);
 }
 
 char *noema_ler_arquivo(const char *caminho) {
@@ -556,6 +1753,13 @@ Valor valor_ponteiro(void *ponteiro) {
     return valor;
 }
 
+Valor valor_sintaxe(No *sintaxe) {
+    Valor valor;
+    valor.tipo = VALOR_SINTAXE;
+    valor.como.sintaxe = sintaxe;
+    return valor;
+}
+
 Valor valor_funcao(FuncaoNoema *funcao) {
     Valor valor;
     valor.tipo = VALOR_FUNCAO;
@@ -781,6 +1985,7 @@ bool valor_eh_verdadeiro(Valor valor) {
             return valor.como.mapa->quantidade > 0;
         case VALOR_PONTEIRO:
             return valor.como.ponteiro != NULL;
+        case VALOR_SINTAXE:
         case VALOR_FUNCAO:
         case VALOR_NATIVA:
             return true;
@@ -808,6 +2013,11 @@ bool valor_iguais(Valor a, Valor b) {
             return a.como.mapa == b.como.mapa;
         case VALOR_PONTEIRO:
             return a.como.ponteiro == b.como.ponteiro;
+        case VALOR_SINTAXE: {
+            char *texto_a = no_para_texto(a.como.sintaxe);
+            char *texto_b = no_para_texto(b.como.sintaxe);
+            return strcmp(texto_a, texto_b) == 0;
+        }
         case VALOR_FUNCAO:
             return a.como.funcao == b.como.funcao;
         case VALOR_NATIVA:
@@ -828,6 +2038,8 @@ double valor_para_numero(Valor valor) {
             return 0.0;
         case VALOR_PONTEIRO:
             return (double)(uintptr_t)valor.como.ponteiro;
+        case VALOR_SINTAXE:
+            noema_falhar("nao foi possivel converter syntax para numero");
         default:
             noema_falhar("nao foi possivel converter %s para numero", valor_tipo_nome(valor));
     }
@@ -850,6 +2062,8 @@ const char *valor_tipo_nome(Valor valor) {
             return "map";
         case VALOR_PONTEIRO:
             return "pointer";
+        case VALOR_SINTAXE:
+            return "syntax";
         case VALOR_FUNCAO:
             return "function";
         case VALOR_NATIVA:
@@ -874,6 +2088,8 @@ static char *valor_para_texto_interno(Valor valor, int profundidade) {
             return noema_duplicar(valor.como.texto);
         case VALOR_PONTEIRO:
             return noema_formatar("<pointer %p>", valor.como.ponteiro);
+        case VALOR_SINTAXE:
+            return no_para_texto(valor.como.sintaxe);
         case VALOR_FUNCAO:
             return noema_formatar("<function %s>", valor.como.funcao->nome);
         case VALOR_NATIVA:
@@ -1248,9 +2464,18 @@ static Valor avaliar(Interpretador *interpretador, Ambiente *ambiente, No *no) {
             return avaliar_atribuicao(interpretador, ambiente, no);
         case NO_FUNCAO_ANONIMA:
             return valor_funcao(criar_funcao_noema(no, ambiente, "<anonymous>"));
+        case NO_SYNTAX_TEMPLATE:
+            return valor_sintaxe(avaliar_template_sintaxe_no(interpretador, ambiente, no->como.template_sintaxe.corpo));
+        case NO_EXPAND:
+            noema_falhar("'expand' so pode ser usado durante a expansao de macros");
+            return valor_nulo();
+        case NO_SYNTAX_PLACEHOLDER:
+            noema_falhar("placeholder de sintaxe fora de syntax");
+            return valor_nulo();
         case NO_DECL_LET:
         case NO_DECL_CONST:
         case NO_DECL_FUNCAO:
+        case NO_DECL_MACRO:
         case NO_EXPR_STMT:
         case NO_IF:
         case NO_WHILE:
@@ -1327,6 +2552,8 @@ static ResultadoExecucao executar(Interpretador *interpretador, Ambiente *ambien
             ambiente_definir(ambiente, funcao->nome, valor_funcao(funcao), true);
             return resultado_normal(valor_funcao(funcao));
         }
+        case NO_DECL_MACRO:
+            return resultado_normal(valor_nulo());
         case NO_EXPR_STMT:
             return resultado_normal(avaliar(interpretador, ambiente, no->como.expressao.expressao));
         case NO_IF: {
@@ -1406,6 +2633,14 @@ static ResultadoExecucao executar(Interpretador *interpretador, Ambiente *ambien
         case NO_DECL_PLUGIN:
             plugin_registrar_no_ambiente(interpretador, ambiente, no);
             return resultado_normal(valor_nulo());
+        case NO_EXPAND:
+            noema_falhar("'expand' so pode ser usado durante a expansao de macros");
+            return resultado_normal(valor_nulo());
+        case NO_SYNTAX_TEMPLATE:
+            return resultado_normal(avaliar(interpretador, ambiente, no));
+        case NO_SYNTAX_PLACEHOLDER:
+            noema_falhar("placeholder de sintaxe fora de syntax");
+            return resultado_normal(valor_nulo());
         case NO_FUNCAO_ANONIMA:
         case NO_LITERAL:
         case NO_VARIAVEL:
@@ -1453,8 +2688,14 @@ Valor chamar_valor(Interpretador *interpretador, Ambiente *ambiente, Valor alvo,
 
 Valor interpretador_executar_programa(Interpretador *interpretador, Programa *programa, Ambiente *ambiente) {
     Valor ultimo = valor_nulo();
+    AmbienteMacro macros;
+    ambiente_macro_inicializar(&macros, NULL);
     for (int i = 0; i < programa->quantidade; i++) {
-        ResultadoExecucao resultado = executar(interpretador, ambiente, programa->nos[i]);
+        No *expandido = expandir_no(interpretador, &macros, programa->nos[i], true);
+        if (expandido == NULL) {
+            continue;
+        }
+        ResultadoExecucao resultado = executar(interpretador, ambiente, expandido);
         if (resultado.sinal == EXEC_RETURN) {
             return resultado.valor;
         }

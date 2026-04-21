@@ -53,6 +53,9 @@ Funcoes e constantes principais:
 - `string`, `number`, `int`, `bool`
 - `parse_number`, `parse_int`
 - `is_null`, `is_bool`, `is_number`, `is_string`, `is_list`, `is_map`, `is_function`, `is_pointer`
+- `memory_alloc`, `memory_free`, `memory_fill`
+- `memory_get_u8`, `memory_get_i32`, `memory_get_u32`
+- `memory_set_u8`, `memory_set_i32`, `memory_set_u32`
 - `is_scalar`
 - `default`, `defined`
 - `identity`, `noop`

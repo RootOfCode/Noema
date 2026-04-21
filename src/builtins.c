@@ -6,6 +6,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -50,6 +51,25 @@ static Valor builtin_is_list(Interpretador *interpretador, Ambiente *ambiente, i
 static Valor builtin_is_map(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
 static Valor builtin_is_function(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
 static Valor builtin_is_pointer(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_is_syntax(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_kind(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_text(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_parts(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_identifier(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_literal(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_block(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_let(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_const(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_syntax_function(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_alloc(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_free(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_fill(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_get_u8(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_get_i32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_get_u32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_set_u8(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_set_i32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
+static Valor builtin_memory_set_u32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
 static Valor builtin_string(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
 static Valor builtin_number(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
 static Valor builtin_int(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados);
@@ -187,6 +207,413 @@ static const char *esperar_texto(const char *nome, Valor valor) {
         noema_falhar("builtin '%s' exige string", nome);
     }
     return valor.como.texto;
+}
+
+static void *esperar_ponteiro(const char *nome, Valor valor) {
+    if (valor.tipo == VALOR_NULO) {
+        return NULL;
+    }
+    if (valor.tipo != VALOR_PONTEIRO) {
+        noema_falhar("builtin '%s' exige pointer", nome);
+    }
+    return valor.como.ponteiro;
+}
+
+static No *esperar_sintaxe(const char *nome, Valor valor) {
+    if (valor.tipo != VALOR_SINTAXE) {
+        noema_falhar("builtin '%s' exige syntax", nome);
+    }
+    return valor.como.sintaxe;
+}
+
+static No *builtin_novo_no(TipoNo tipo, int linha) {
+    No *no = calloc(1, sizeof(No));
+    if (no == NULL) {
+        noema_falhar("memoria insuficiente");
+    }
+    no->tipo = tipo;
+    no->linha = linha;
+    return no;
+}
+
+static void builtin_bloco_adicionar_item(No *bloco, No *item) {
+    if (bloco->como.bloco.quantidade >= bloco->como.bloco.capacidade) {
+        bloco->como.bloco.capacidade = bloco->como.bloco.capacidade == 0 ? 8 : bloco->como.bloco.capacidade * 2;
+        bloco->como.bloco.itens = realloc(bloco->como.bloco.itens,
+                                          (size_t)bloco->como.bloco.capacidade * sizeof(No *));
+        if (bloco->como.bloco.itens == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    bloco->como.bloco.itens[bloco->como.bloco.quantidade++] = item;
+}
+
+static void builtin_lista_adicionar_item(No *lista, No *item) {
+    if (lista->como.lista.quantidade >= lista->como.lista.capacidade) {
+        lista->como.lista.capacidade = lista->como.lista.capacidade == 0 ? 8 : lista->como.lista.capacidade * 2;
+        lista->como.lista.itens = realloc(lista->como.lista.itens,
+                                          (size_t)lista->como.lista.capacidade * sizeof(No *));
+        if (lista->como.lista.itens == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    lista->como.lista.itens[lista->como.lista.quantidade++] = item;
+}
+
+static void builtin_mapa_adicionar_item(No *mapa, const char *chave, No *valor) {
+    if (mapa->como.mapa.quantidade >= mapa->como.mapa.capacidade) {
+        mapa->como.mapa.capacidade = mapa->como.mapa.capacidade == 0 ? 8 : mapa->como.mapa.capacidade * 2;
+        mapa->como.mapa.chaves = realloc(mapa->como.mapa.chaves,
+                                         (size_t)mapa->como.mapa.capacidade * sizeof(char *));
+        mapa->como.mapa.valores = realloc(mapa->como.mapa.valores,
+                                          (size_t)mapa->como.mapa.capacidade * sizeof(No *));
+        if (mapa->como.mapa.chaves == NULL || mapa->como.mapa.valores == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    mapa->como.mapa.chaves[mapa->como.mapa.quantidade] = noema_duplicar(chave);
+    mapa->como.mapa.valores[mapa->como.mapa.quantidade] = valor;
+    mapa->como.mapa.quantidade++;
+}
+
+static bool builtin_no_eh_expressao(TipoNo tipo) {
+    switch (tipo) {
+        case NO_LITERAL:
+        case NO_VARIAVEL:
+        case NO_LISTA_LITERAL:
+        case NO_MAPA_LITERAL:
+        case NO_BINARIO:
+        case NO_UNARIO:
+        case NO_CHAMADA:
+        case NO_MEMBRO:
+        case NO_INDICE:
+        case NO_ATRIBUICAO:
+        case NO_FUNCAO_ANONIMA:
+        case NO_EXPAND:
+        case NO_SYNTAX_TEMPLATE:
+        case NO_SYNTAX_PLACEHOLDER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static const char *builtin_operador_texto(TipoToken operador) {
+    switch (operador) {
+        case TOKEN_MAIS: return "+";
+        case TOKEN_MENOS: return "-";
+        case TOKEN_ASTERISCO: return "*";
+        case TOKEN_BARRA: return "/";
+        case TOKEN_PERCENTUAL: return "%";
+        case TOKEN_IGUAL: return "==";
+        case TOKEN_DIFERENTE: return "!=";
+        case TOKEN_MENOR: return "<";
+        case TOKEN_MENOR_IGUAL: return "<=";
+        case TOKEN_MAIOR: return ">";
+        case TOKEN_MAIOR_IGUAL: return ">=";
+        case TOKEN_AND: return "and";
+        case TOKEN_OR: return "or";
+        case TOKEN_NOT: return "not";
+        default: return "?";
+    }
+}
+
+static No *builtin_valor_para_sintaxe(Valor valor, int linha) {
+    switch (valor.tipo) {
+        case VALOR_SINTAXE:
+            return valor.como.sintaxe;
+        case VALOR_NULO:
+        case VALOR_BOOL:
+        case VALOR_NUMERO:
+        case VALOR_TEXTO: {
+            No *literal = builtin_novo_no(NO_LITERAL, linha);
+            literal->como.literal.valor = valor;
+            return literal;
+        }
+        case VALOR_LISTA: {
+            No *lista = builtin_novo_no(NO_LISTA_LITERAL, linha);
+            for (int i = 0; i < valor.como.lista->quantidade; i++) {
+                builtin_lista_adicionar_item(lista, builtin_valor_para_sintaxe(valor.como.lista->itens[i], linha));
+            }
+            return lista;
+        }
+        case VALOR_MAPA: {
+            No *mapa = builtin_novo_no(NO_MAPA_LITERAL, linha);
+            for (int i = 0; i < valor.como.mapa->quantidade; i++) {
+                builtin_mapa_adicionar_item(mapa,
+                                            valor.como.mapa->entradas[i].chave,
+                                            builtin_valor_para_sintaxe(valor.como.mapa->entradas[i].valor, linha));
+            }
+            return mapa;
+        }
+        default:
+            noema_falhar("valor do tipo %s nao pode ser convertido para syntax", valor_tipo_nome(valor));
+    }
+    return NULL;
+}
+
+static No *builtin_normalizar_para_instrucao(No *no, int linha) {
+    if (no == NULL) {
+        return NULL;
+    }
+    if (builtin_no_eh_expressao(no->tipo)) {
+        No *stmt = builtin_novo_no(NO_EXPR_STMT, linha);
+        stmt->como.expressao.expressao = no;
+        return stmt;
+    }
+    return no;
+}
+
+static const char *builtin_syntax_kind_texto(TipoNo tipo) {
+    switch (tipo) {
+        case NO_BLOCO: return "block";
+        case NO_LITERAL: return "literal";
+        case NO_VARIAVEL: return "identifier";
+        case NO_LISTA_LITERAL: return "list";
+        case NO_MAPA_LITERAL: return "map";
+        case NO_BINARIO: return "binary";
+        case NO_UNARIO: return "unary";
+        case NO_CHAMADA: return "call";
+        case NO_MEMBRO: return "member";
+        case NO_INDICE: return "index";
+        case NO_ATRIBUICAO: return "assign";
+        case NO_DECL_LET: return "let";
+        case NO_DECL_CONST: return "const";
+        case NO_DECL_FUNCAO: return "function";
+        case NO_DECL_MACRO: return "macro";
+        case NO_FUNCAO_ANONIMA: return "lambda";
+        case NO_EXPR_STMT: return "expr_stmt";
+        case NO_EXPAND: return "expand";
+        case NO_SYNTAX_TEMPLATE: return "syntax_template";
+        case NO_SYNTAX_PLACEHOLDER: return "syntax_placeholder";
+        case NO_IF: return "if";
+        case NO_WHILE: return "while";
+        case NO_FOR: return "for";
+        case NO_RETURN: return "return";
+        case NO_BREAK: return "break";
+        case NO_CONTINUE: return "continue";
+        case NO_DECL_PLUGIN: return "plugin";
+    }
+    return "unknown";
+}
+
+static Valor builtin_lista_textos_para_valor(char **textos, int quantidade) {
+    Lista *lista = lista_criar();
+    for (int i = 0; i < quantidade; i++) {
+        lista_adicionar(lista, valor_texto(textos[i]));
+    }
+    return valor_lista(lista);
+}
+
+static char **builtin_parametros_texto(const char *nome, Valor valor, int *quantidade) {
+    Lista *lista = esperar_lista(nome, valor);
+    char **parametros = calloc((size_t)lista->quantidade, sizeof(char *));
+    if (parametros == NULL && lista->quantidade > 0) {
+        noema_falhar("memoria insuficiente");
+    }
+    for (int i = 0; i < lista->quantidade; i++) {
+        parametros[i] = noema_duplicar(esperar_texto(nome, lista->itens[i]));
+    }
+    *quantidade = lista->quantidade;
+    return parametros;
+}
+
+static Valor builtin_syntax_partes(No *no) {
+    Mapa *partes = mapa_criar();
+    char *texto = valor_para_texto(valor_sintaxe(no));
+    mapa_definir(partes, "kind", valor_texto(builtin_syntax_kind_texto(no->tipo)));
+    mapa_definir(partes, "expression", valor_bool(builtin_no_eh_expressao(no->tipo)));
+    mapa_definir(partes, "text", valor_texto(texto));
+
+    switch (no->tipo) {
+        case NO_BLOCO: {
+            Lista *itens = lista_criar();
+            for (int i = 0; i < no->como.bloco.quantidade; i++) {
+                lista_adicionar(itens, valor_sintaxe(no->como.bloco.itens[i]));
+            }
+            mapa_definir(partes, "items", valor_lista(itens));
+            break;
+        }
+        case NO_LITERAL:
+            mapa_definir(partes, "value", no->como.literal.valor);
+            break;
+        case NO_VARIAVEL:
+            mapa_definir(partes, "name", valor_texto(no->como.variavel.nome));
+            break;
+        case NO_LISTA_LITERAL: {
+            Lista *itens = lista_criar();
+            for (int i = 0; i < no->como.lista.quantidade; i++) {
+                lista_adicionar(itens, valor_sintaxe(no->como.lista.itens[i]));
+            }
+            mapa_definir(partes, "items", valor_lista(itens));
+            break;
+        }
+        case NO_MAPA_LITERAL: {
+            Lista *entradas = lista_criar();
+            for (int i = 0; i < no->como.mapa.quantidade; i++) {
+                Mapa *entrada = mapa_criar();
+                mapa_definir(entrada, "key", valor_texto(no->como.mapa.chaves[i]));
+                mapa_definir(entrada, "value", valor_sintaxe(no->como.mapa.valores[i]));
+                lista_adicionar(entradas, valor_mapa(entrada));
+            }
+            mapa_definir(partes, "entries", valor_lista(entradas));
+            break;
+        }
+        case NO_BINARIO:
+            mapa_definir(partes, "left", valor_sintaxe(no->como.binario.esquerda));
+            mapa_definir(partes, "operator", valor_texto(builtin_operador_texto(no->como.binario.operador)));
+            mapa_definir(partes, "right", valor_sintaxe(no->como.binario.direita));
+            break;
+        case NO_UNARIO:
+            mapa_definir(partes, "operator", valor_texto(builtin_operador_texto(no->como.unario.operador)));
+            mapa_definir(partes, "value", valor_sintaxe(no->como.unario.direita));
+            break;
+        case NO_CHAMADA: {
+            Lista *args = lista_criar();
+            for (int i = 0; i < no->como.chamada.quantidade_argumentos; i++) {
+                lista_adicionar(args, valor_sintaxe(no->como.chamada.argumentos[i]));
+            }
+            mapa_definir(partes, "target", valor_sintaxe(no->como.chamada.alvo));
+            mapa_definir(partes, "args", valor_lista(args));
+            break;
+        }
+        case NO_MEMBRO:
+            mapa_definir(partes, "object", valor_sintaxe(no->como.membro.objeto));
+            mapa_definir(partes, "name", valor_texto(no->como.membro.nome));
+            break;
+        case NO_INDICE:
+            mapa_definir(partes, "object", valor_sintaxe(no->como.indice.objeto));
+            mapa_definir(partes, "index", valor_sintaxe(no->como.indice.indice));
+            break;
+        case NO_ATRIBUICAO:
+            mapa_definir(partes, "target", valor_sintaxe(no->como.atribuicao.alvo));
+            mapa_definir(partes, "value", valor_sintaxe(no->como.atribuicao.valor));
+            break;
+        case NO_DECL_LET:
+        case NO_DECL_CONST:
+            mapa_definir(partes, "name", valor_texto(no->como.declaracao_variavel.nome));
+            mapa_definir(partes,
+                         "value",
+                         no->como.declaracao_variavel.inicializador != NULL
+                             ? valor_sintaxe(no->como.declaracao_variavel.inicializador)
+                             : valor_nulo());
+            break;
+        case NO_DECL_FUNCAO:
+        case NO_FUNCAO_ANONIMA:
+            mapa_definir(partes,
+                         "name",
+                         no->como.declaracao_funcao.nome != NULL
+                             ? valor_texto(no->como.declaracao_funcao.nome)
+                             : valor_nulo());
+            mapa_definir(partes,
+                         "params",
+                         builtin_lista_textos_para_valor(no->como.declaracao_funcao.parametros,
+                                                         no->como.declaracao_funcao.quantidade_parametros));
+            mapa_definir(partes, "body", valor_sintaxe(no->como.declaracao_funcao.corpo));
+            break;
+        case NO_DECL_MACRO:
+            mapa_definir(partes,
+                         "name",
+                         no->como.declaracao_macro.nome != NULL
+                             ? valor_texto(no->como.declaracao_macro.nome)
+                             : valor_nulo());
+            mapa_definir(partes,
+                         "params",
+                         builtin_lista_textos_para_valor(no->como.declaracao_macro.parametros,
+                                                         no->como.declaracao_macro.quantidade_parametros));
+            mapa_definir(partes, "body", valor_sintaxe(no->como.declaracao_macro.corpo));
+            break;
+        case NO_EXPR_STMT:
+            mapa_definir(partes, "value", valor_sintaxe(no->como.expressao.expressao));
+            break;
+        case NO_EXPAND: {
+            Lista *args = lista_criar();
+            for (int i = 0; i < no->como.expansao_macro.quantidade_argumentos; i++) {
+                lista_adicionar(args, valor_sintaxe(no->como.expansao_macro.argumentos[i]));
+            }
+            mapa_definir(partes, "name", valor_texto(no->como.expansao_macro.nome));
+            mapa_definir(partes, "args", valor_lista(args));
+            break;
+        }
+        case NO_SYNTAX_TEMPLATE:
+            mapa_definir(partes, "body", valor_sintaxe(no->como.template_sintaxe.corpo));
+            break;
+        case NO_SYNTAX_PLACEHOLDER:
+            mapa_definir(partes,
+                         "name",
+                         no->como.placeholder_sintaxe.nome != NULL
+                             ? valor_texto(no->como.placeholder_sintaxe.nome)
+                             : valor_nulo());
+            mapa_definir(partes,
+                         "value",
+                         no->como.placeholder_sintaxe.expressao != NULL
+                             ? valor_sintaxe(no->como.placeholder_sintaxe.expressao)
+                             : valor_nulo());
+            break;
+        case NO_IF:
+            mapa_definir(partes, "condition", valor_sintaxe(no->como.condicional.condicao));
+            mapa_definir(partes, "then", valor_sintaxe(no->como.condicional.ramo_entao));
+            mapa_definir(partes,
+                         "else",
+                         no->como.condicional.ramo_senao != NULL
+                             ? valor_sintaxe(no->como.condicional.ramo_senao)
+                             : valor_nulo());
+            break;
+        case NO_WHILE:
+            mapa_definir(partes, "condition", valor_sintaxe(no->como.enquanto.condicao));
+            mapa_definir(partes, "body", valor_sintaxe(no->como.enquanto.corpo));
+            break;
+        case NO_FOR:
+            mapa_definir(partes, "name", valor_texto(no->como.para.variavel));
+            mapa_definir(partes, "iterable", valor_sintaxe(no->como.para.iteravel));
+            mapa_definir(partes, "body", valor_sintaxe(no->como.para.corpo));
+            break;
+        case NO_RETURN:
+            mapa_definir(partes,
+                         "value",
+                         no->como.retorno.valor != NULL ? valor_sintaxe(no->como.retorno.valor) : valor_nulo());
+            break;
+        case NO_BREAK:
+        case NO_CONTINUE:
+            break;
+        case NO_DECL_PLUGIN:
+            mapa_definir(partes, "name", valor_texto(no->como.plugin.nome));
+            break;
+    }
+
+    return valor_mapa(partes);
+}
+
+static size_t esperar_tamanho_nao_negativo(const char *nome, Valor valor, const char *campo) {
+    double numero = trunc(valor_para_numero(valor));
+    if (!isfinite(numero) || numero < 0.0) {
+        noema_falhar("builtin '%s' exige %s >= 0", nome, campo);
+    }
+    return (size_t)numero;
+}
+
+static uint8_t esperar_u8(const char *nome, Valor valor, const char *campo) {
+    double numero = trunc(valor_para_numero(valor));
+    if (!isfinite(numero) || numero < 0.0 || numero > 255.0) {
+        noema_falhar("builtin '%s' exige %s entre 0 e 255", nome, campo);
+    }
+    return (uint8_t)numero;
+}
+
+static int32_t esperar_i32(const char *nome, Valor valor, const char *campo) {
+    double numero = trunc(valor_para_numero(valor));
+    if (!isfinite(numero) || numero < (double)INT32_MIN || numero > (double)INT32_MAX) {
+        noema_falhar("builtin '%s' exige %s no intervalo de int32", nome, campo);
+    }
+    return (int32_t)numero;
+}
+
+static uint32_t esperar_u32(const char *nome, Valor valor, const char *campo) {
+    double numero = trunc(valor_para_numero(valor));
+    if (!isfinite(numero) || numero < 0.0 || numero > (double)UINT32_MAX) {
+        noema_falhar("builtin '%s' exige %s no intervalo de uint32", nome, campo);
+    }
+    return (uint32_t)numero;
 }
 
 static bool valor_eh_funcao(Valor valor) {
@@ -914,6 +1341,276 @@ static Valor builtin_is_pointer(Interpretador *interpretador, Ambiente *ambiente
     (void)dados;
     garantir_argumentos("is_pointer", argc, 1, 1);
     return valor_bool(argv[0].tipo == VALOR_PONTEIRO);
+}
+
+static Valor builtin_is_syntax(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("is_syntax", argc, 1, 1);
+    return valor_bool(argv[0].tipo == VALOR_SINTAXE);
+}
+
+static Valor builtin_syntax_kind(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_kind", argc, 1, 1);
+    No *sintaxe = esperar_sintaxe("syntax_kind", argv[0]);
+    return valor_texto(builtin_syntax_kind_texto(sintaxe->tipo));
+}
+
+static Valor builtin_syntax_text(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_text", argc, 1, 1);
+    No *sintaxe = esperar_sintaxe("syntax_text", argv[0]);
+    char *texto = valor_para_texto(valor_sintaxe(sintaxe));
+    return valor_texto(texto);
+}
+
+static Valor builtin_syntax_parts(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_parts", argc, 1, 1);
+    return builtin_syntax_partes(esperar_sintaxe("syntax_parts", argv[0]));
+}
+
+static Valor builtin_syntax_identifier(Interpretador *interpretador,
+                                       Ambiente *ambiente,
+                                       int argc,
+                                       Valor *argv,
+                                       void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_identifier", argc, 1, 1);
+    const char *nome = esperar_texto("syntax_identifier", argv[0]);
+    No *identificador = builtin_novo_no(NO_VARIAVEL, 0);
+    identificador->como.variavel.nome = noema_duplicar(nome);
+    return valor_sintaxe(identificador);
+}
+
+static Valor builtin_syntax_literal(Interpretador *interpretador,
+                                    Ambiente *ambiente,
+                                    int argc,
+                                    Valor *argv,
+                                    void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_literal", argc, 1, 1);
+    return valor_sintaxe(builtin_valor_para_sintaxe(argv[0], 0));
+}
+
+static Valor builtin_syntax_block(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_block", argc, 1, 1);
+    Lista *itens = esperar_lista("syntax_block", argv[0]);
+    No *bloco = builtin_novo_no(NO_BLOCO, 0);
+    for (int i = 0; i < itens->quantidade; i++) {
+        builtin_bloco_adicionar_item(bloco,
+                                     builtin_normalizar_para_instrucao(
+                                         builtin_valor_para_sintaxe(itens->itens[i], 0),
+                                         0));
+    }
+    return valor_sintaxe(bloco);
+}
+
+static Valor builtin_syntax_let(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_let", argc, 1, 2);
+    No *no = builtin_novo_no(NO_DECL_LET, 0);
+    no->como.declaracao_variavel.nome = noema_duplicar(esperar_texto("syntax_let", argv[0]));
+    no->como.declaracao_variavel.inicializador =
+        argc == 2 ? builtin_valor_para_sintaxe(argv[1], 0) : NULL;
+    if (no->como.declaracao_variavel.inicializador != NULL &&
+        !builtin_no_eh_expressao(no->como.declaracao_variavel.inicializador->tipo)) {
+        noema_falhar("builtin 'syntax_let' exige inicializador em forma de expressao");
+    }
+    return valor_sintaxe(no);
+}
+
+static Valor builtin_syntax_const(Interpretador *interpretador,
+                                  Ambiente *ambiente,
+                                  int argc,
+                                  Valor *argv,
+                                  void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_const", argc, 1, 2);
+    No *no = builtin_novo_no(NO_DECL_CONST, 0);
+    no->como.declaracao_variavel.nome = noema_duplicar(esperar_texto("syntax_const", argv[0]));
+    no->como.declaracao_variavel.inicializador =
+        argc == 2 ? builtin_valor_para_sintaxe(argv[1], 0) : NULL;
+    if (no->como.declaracao_variavel.inicializador != NULL &&
+        !builtin_no_eh_expressao(no->como.declaracao_variavel.inicializador->tipo)) {
+        noema_falhar("builtin 'syntax_const' exige inicializador em forma de expressao");
+    }
+    return valor_sintaxe(no);
+}
+
+static Valor builtin_syntax_function(Interpretador *interpretador,
+                                     Ambiente *ambiente,
+                                     int argc,
+                                     Valor *argv,
+                                     void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("syntax_function", argc, 3, 3);
+
+    No *funcao = builtin_novo_no(NO_DECL_FUNCAO, 0);
+    funcao->como.declaracao_funcao.nome = noema_duplicar(esperar_texto("syntax_function", argv[0]));
+    funcao->como.declaracao_funcao.parametros = builtin_parametros_texto("syntax_function", argv[1],
+                                                                         &funcao->como.declaracao_funcao.quantidade_parametros);
+
+    No *corpo = builtin_valor_para_sintaxe(argv[2], 0);
+    if (corpo->tipo != NO_BLOCO) {
+        No *bloco = builtin_novo_no(NO_BLOCO, 0);
+        if (builtin_no_eh_expressao(corpo->tipo)) {
+            No *retorno = builtin_novo_no(NO_RETURN, 0);
+            retorno->como.retorno.valor = corpo;
+            builtin_bloco_adicionar_item(bloco, retorno);
+        } else {
+            builtin_bloco_adicionar_item(bloco, builtin_normalizar_para_instrucao(corpo, 0));
+        }
+        corpo = bloco;
+    }
+
+    funcao->como.declaracao_funcao.corpo = corpo;
+    return valor_sintaxe(funcao);
+}
+
+static Valor builtin_memory_alloc(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_alloc", argc, 1, 1);
+    size_t tamanho = esperar_tamanho_nao_negativo("memory_alloc", argv[0], "size");
+    void *bloco = calloc(tamanho > 0 ? tamanho : 1, 1);
+    if (bloco == NULL) {
+        noema_falhar("memoria insuficiente");
+    }
+    return valor_ponteiro(bloco);
+}
+
+static Valor builtin_memory_free(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_free", argc, 1, 1);
+    free(esperar_ponteiro("memory_free", argv[0]));
+    return valor_nulo();
+}
+
+static Valor builtin_memory_fill(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_fill", argc, 3, 3);
+    void *ponteiro = esperar_ponteiro("memory_fill", argv[0]);
+    if (ponteiro == NULL) {
+        noema_falhar("builtin 'memory_fill' exige pointer nao nulo");
+    }
+    uint8_t valor = esperar_u8("memory_fill", argv[1], "value");
+    size_t tamanho = esperar_tamanho_nao_negativo("memory_fill", argv[2], "size");
+    memset(ponteiro, valor, tamanho);
+    return argv[0];
+}
+
+static Valor builtin_memory_get_u8(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_get_u8", argc, 2, 2);
+    unsigned char *base = esperar_ponteiro("memory_get_u8", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_get_u8' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_get_u8", argv[1], "offset");
+    return valor_numero((double)base[deslocamento]);
+}
+
+static Valor builtin_memory_get_i32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_get_i32", argc, 2, 2);
+    unsigned char *base = esperar_ponteiro("memory_get_i32", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_get_i32' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_get_i32", argv[1], "offset");
+    int32_t valor = 0;
+    memcpy(&valor, base + deslocamento, sizeof(valor));
+    return valor_numero((double)valor);
+}
+
+static Valor builtin_memory_get_u32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_get_u32", argc, 2, 2);
+    unsigned char *base = esperar_ponteiro("memory_get_u32", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_get_u32' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_get_u32", argv[1], "offset");
+    uint32_t valor = 0;
+    memcpy(&valor, base + deslocamento, sizeof(valor));
+    return valor_numero((double)valor);
+}
+
+static Valor builtin_memory_set_u8(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_set_u8", argc, 3, 3);
+    unsigned char *base = esperar_ponteiro("memory_set_u8", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_set_u8' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_set_u8", argv[1], "offset");
+    base[deslocamento] = esperar_u8("memory_set_u8", argv[2], "value");
+    return argv[0];
+}
+
+static Valor builtin_memory_set_i32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_set_i32", argc, 3, 3);
+    unsigned char *base = esperar_ponteiro("memory_set_i32", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_set_i32' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_set_i32", argv[1], "offset");
+    int32_t valor = esperar_i32("memory_set_i32", argv[2], "value");
+    memcpy(base + deslocamento, &valor, sizeof(valor));
+    return argv[0];
+}
+
+static Valor builtin_memory_set_u32(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
+    (void)interpretador;
+    (void)ambiente;
+    (void)dados;
+    garantir_argumentos("memory_set_u32", argc, 3, 3);
+    unsigned char *base = esperar_ponteiro("memory_set_u32", argv[0]);
+    if (base == NULL) {
+        noema_falhar("builtin 'memory_set_u32' exige pointer nao nulo");
+    }
+    size_t deslocamento = esperar_tamanho_nao_negativo("memory_set_u32", argv[1], "offset");
+    uint32_t valor = esperar_u32("memory_set_u32", argv[2], "value");
+    memcpy(base + deslocamento, &valor, sizeof(valor));
+    return argv[0];
 }
 
 static Valor builtin_string(Interpretador *interpretador, Ambiente *ambiente, int argc, Valor *argv, void *dados) {
@@ -2532,6 +3229,25 @@ void registrar_builtins(Interpretador *interpretador) {
     registrar_nativa(interpretador, "is_map", builtin_is_map, NULL);
     registrar_nativa(interpretador, "is_function", builtin_is_function, NULL);
     registrar_nativa(interpretador, "is_pointer", builtin_is_pointer, NULL);
+    registrar_nativa(interpretador, "is_syntax", builtin_is_syntax, NULL);
+    registrar_nativa(interpretador, "syntax_kind", builtin_syntax_kind, NULL);
+    registrar_nativa(interpretador, "syntax_text", builtin_syntax_text, NULL);
+    registrar_nativa(interpretador, "syntax_parts", builtin_syntax_parts, NULL);
+    registrar_nativa(interpretador, "syntax_identifier", builtin_syntax_identifier, NULL);
+    registrar_nativa(interpretador, "syntax_literal", builtin_syntax_literal, NULL);
+    registrar_nativa(interpretador, "syntax_block", builtin_syntax_block, NULL);
+    registrar_nativa(interpretador, "syntax_let", builtin_syntax_let, NULL);
+    registrar_nativa(interpretador, "syntax_const", builtin_syntax_const, NULL);
+    registrar_nativa(interpretador, "syntax_function", builtin_syntax_function, NULL);
+    registrar_nativa(interpretador, "memory_alloc", builtin_memory_alloc, NULL);
+    registrar_nativa(interpretador, "memory_free", builtin_memory_free, NULL);
+    registrar_nativa(interpretador, "memory_fill", builtin_memory_fill, NULL);
+    registrar_nativa(interpretador, "memory_get_u8", builtin_memory_get_u8, NULL);
+    registrar_nativa(interpretador, "memory_get_i32", builtin_memory_get_i32, NULL);
+    registrar_nativa(interpretador, "memory_get_u32", builtin_memory_get_u32, NULL);
+    registrar_nativa(interpretador, "memory_set_u8", builtin_memory_set_u8, NULL);
+    registrar_nativa(interpretador, "memory_set_i32", builtin_memory_set_i32, NULL);
+    registrar_nativa(interpretador, "memory_set_u32", builtin_memory_set_u32, NULL);
     registrar_nativa(interpretador, "string", builtin_string, NULL);
     registrar_nativa(interpretador, "number", builtin_number, NULL);
     registrar_nativa(interpretador, "int", builtin_int, NULL);

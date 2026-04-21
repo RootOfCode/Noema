@@ -1,25 +1,43 @@
+macro unless_do(cond, body) {
+    return syntax if not $cond { $body }
+}
+
+macro require_binary(expr) {
+    let parts = syntax_parts(expr)
+    if parts.kind != "binary" {
+        panic("require_binary expects a binary expression")
+    }
+    return syntax $expr
+}
+
 macro make_metric(name, expr) {
-function $name(values) {
-    return $expr;
+    return syntax_function(syntax_text(name), ["values"], syntax {
+        return $expr
+    })
 }
+
+macro form_kind(expr) {
+    return syntax_literal(syntax_kind(expr))
 }
 
-var dataset = [3, 5, 8, 13];
+var dataset = [3, 5, 8, 13]
 
-expand make_metric(total_metric, sum(values));
-expand make_metric(count_metric, len(values));
-expand make_metric(mean_metric, sum(values) / len(values));
+expand make_metric(total_metric, sum(values))
+expand make_metric(count_metric, len(values))
+expand make_metric(mean_metric, expand require_binary(sum(values) / len(values)))
 
-var summary = Patterns.fill("total=$total count=$count mean=$mean", {
+expand unless_do(len(dataset) == 0, {
+    IO.puts("dataset ready")
+})
+
+var summary = Patterns.fill("total=$total count=$count mean=$mean kind=$kind", {
     total: total_metric(dataset),
     count: count_metric(dataset),
-    mean: mean_metric(dataset)
-});
+    mean: mean_metric(dataset),
+    kind: expand form_kind(sum(values) / len(values))
+})
 
 IO.show("total", total_metric(dataset))
 IO.show("count", count_metric(dataset))
 IO.show("mean", mean_metric(dataset))
 IO.puts(summary)
-
-eval("fn cube(x) => x * x * x;");
-IO.show("cube(4)", cube(4))

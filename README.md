@@ -34,22 +34,26 @@ Os pontos centrais de Noema sao:
 ## Exemplo rapido
 
 ```noema
-macro make_metric(name, expr) {
-function $name(values) {
-    return $expr;
-}
+macro unless_do(cond, body) {
+    return syntax if not $cond { $body }
 }
 
-expand make_metric(total_metric, sum(values));
-expand make_metric(mean_metric, sum(values) / len(values));
+macro make_metric(name, expr) {
+    return syntax_function(syntax_text(name), ["values"], syntax {
+        return $expr
+    })
+}
 
 var data = [3, 5, 8, 13]
 
+expand make_metric(total_metric, sum(values))
+expand make_metric(mean_metric, sum(values) / len(values))
+expand unless_do(len(data) == 0, {
+    IO.puts("dataset ready")
+})
+
 IO.show("total", total_metric(data))
 IO.show("mean", mean_metric(data))
-
-var matched = Patterns.match("i need *", "I need a better rule engine", {})
-IO.show("captures", matched.captures)
 ```
 
 ## Recursos principais
@@ -57,8 +61,11 @@ IO.show("captures", matched.captures)
 - sintaxe blocada e infixa
 - aliases amigaveis como `fn`, `var`, `use`, `when`, `unless`, `each`, `elif`
 - semicolon opcional quando a instrucao ja termina na linha
-- macros em bloco: `macro name(args) { ... }`
-- forma antiga com crases ainda aceita por compatibilidade
+- numeros aceitam decimal e hexadecimal com prefixo `0x`
+- macros em AST: `macro name(args) { return syntax ... }`
+- `expand name(...)` aceita formas completas, incluindo blocos
+- `syntax ...`, `$name` e `$(expr)` para montar codigo
+- introspecao e construcao de sintaxe com `syntax_kind`, `syntax_parts`, `syntax_function` e afins
 - `eval(...)` para geracao dinamica de codigo
 - `try_eval(...)` para avaliacao protegida no runtime
 - FFI com `libffi` e carregamento dinamico de bibliotecas
@@ -245,10 +252,10 @@ Plugins sao escritos em Noema, mas separados da stdlib:
 
 ```noema
 plugin Ncurses {
-    library "libncurses.so.6"
-    bind initscr() -> pointer as "initscr"
-    bind endwin() -> int as "endwin"
-    bind mvaddstr(int, int, string) -> int as "mvaddstr"
+    library "libncurses.so.6", "libncursesw.so.6", "libncurses.so"
+    bind initscr() -> pointer
+    bind endwin() -> int
+    bind mvaddstr(int, int, string) -> int
 }
 ```
 
@@ -273,6 +280,13 @@ Em geral:
 
 - Linux usa `.so`
 - Windows usa `.dll`
+
+O runtime tenta as bibliotecas na ordem declarada em `library`.
+Se o nome local da funcao ja for igual ao simbolo nativo, `as "..."` e opcional.
+Use `as` apenas quando precisar expor um alias diferente.
+Para structs, buffers e parametros de saida, use os helpers de memoria:
+`memory_alloc`, `memory_free`, `memory_fill`, `memory_get_u8`, `memory_get_i32`,
+`memory_get_u32`, `memory_set_u8`, `memory_set_i32` e `memory_set_u32`.
 
 ## Documentacao
 
@@ -299,7 +313,7 @@ Para uma descricao por arquivo, veja [docs/files.md](docs/files.md).
 
 ## Exemplos incluidos
 
-- [exemplos/meta.noe](exemplos/meta.noe): macros e `eval(...)`
+- [exemplos/meta.noe](exemplos/meta.noe): macros AST, `syntax` e introspecao
 - [exemplos/eliza.noe](exemplos/eliza.noe): terapeuta por regras estilo ELIZA
 - [exemplos/parry.noe](exemplos/parry.noe): entrevistado paranoico estilo PARRY
 - [exemplos/alice.noe](exemplos/alice.noe): bot por categorias estilo ALICE
@@ -307,6 +321,7 @@ Para uma descricao por arquivo, veja [docs/files.md](docs/files.md).
 - [exemplos/shrdlu.noe](exemplos/shrdlu.noe): blocks world inspirado em SHRDLU
 - [exemplos/boids.noe](exemplos/boids.noe): flocking simbolico/comportamental
 - [exemplos/ncurses_demo.noe](exemplos/ncurses_demo.noe): demo de plugin `ncurses`
+- [exemplos/sdl2_demo.noe](exemplos/sdl2_demo.noe): janela e render loop com plugin `SDL2`
 
 `ncurses_demo.noe` e especifico de Linux/Unix.
 
@@ -314,9 +329,9 @@ Para uma descricao por arquivo, veja [docs/files.md](docs/files.md).
 
 - `src/main.c`: CLI e REPL
 - `src/lexico.c`: tokenizacao
-- `src/preprocessador.c`: `import`, `macro`, `expand`
-- `src/parser.c`: parser recursivo
-- `src/runtime.c`: valores, escopo, execucao e resolucao da stdlib
+- `src/preprocessador.c`: `import` e montagem do codigo fonte
+- `src/parser.c`: parser recursivo, `macro`, `expand` e `syntax`
+- `src/runtime.c`: valores, escopo, execucao, expansao de macros e resolucao da stdlib
 - `src/builtins.c`: builtins da linguagem e base host-side da stdlib
 - `src/ffi.c`: plugins e chamadas FFI
 - `src/noema.h`: tipos e interfaces centrais

@@ -62,6 +62,13 @@ print("hello #{user.name}")
 print(xs[0])
 ```
 
+## Numeros hexadecimais
+
+```noema
+var video_flag = 0x20
+var quit_event = 0x100
+```
+
 ## Semicolon
 
 Semicolon e opcional quando a linha ja fecha a instrucao:
@@ -80,21 +87,33 @@ let x = 1;
 ## Macros
 
 ```noema
-macro define_echo(name) {
-function $name(value) {
-    print(value);
+macro unless_do(cond, body) {
+    return syntax if not $cond { $body }
 }
+
+macro define_echo(name) {
+    return syntax_function(syntax_text(name), ["value"], syntax {
+        print(value)
+    })
 }
 
 expand define_echo(echo_once)
-echo_once("hello")
+expand unless_do(false, {
+    echo_once("hello")
+})
 ```
 
-Formas aceitas:
+Regras centrais:
 
 - `macro name(args) { ... }`
 - `macro name(args) => { ... }`
-- forma antiga com crases, por compatibilidade
+- macros recebem `syntax` nao avaliada
+- `expand name(...)` aceita expressoes, instrucoes e blocos
+- `syntax form` e `syntax { ... }` constroem AST
+- `$name` insere um argumento recebido pela macro
+- `$(expr)` insere o resultado calculado em tempo de expansao
+- introspecao: `is_syntax`, `syntax_kind`, `syntax_text`, `syntax_parts`
+- construtores: `syntax_identifier`, `syntax_literal`, `syntax_block`, `syntax_let`, `syntax_const`, `syntax_function`
 
 ## Avaliacao dinamica
 
@@ -114,6 +133,8 @@ print(result.error)
 ## Builtins importantes
 
 - tipos: `type`, `string`, `number`, `int`, `bool`
+- sintaxe: `is_syntax`, `syntax_kind`, `syntax_text`, `syntax_parts`
+- memoria/FFI: `memory_alloc`, `memory_free`, `memory_get_u32`, `memory_set_i32`
 - colecoes: `len`, `get`, `has`, `push`, `pop`, `keys`, `values`
 - listas: `map`, `filter`, `reduce`, `find`, `any`, `all`, `slice`, `reverse`, `sum`
 - texto: `join`, `split`, `replace`

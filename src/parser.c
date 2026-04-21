@@ -8,6 +8,7 @@ typedef struct {
     Token atual;
     Token anterior;
     bool tem_atual;
+    bool em_template_sintaxe;
     const char *caminho;
 } Parser;
 
@@ -17,6 +18,8 @@ static No *parsear_funcao_anonima(Parser *parser);
 static No *parsear_if(Parser *parser, bool inverter_condicao);
 static No *parsear_while(Parser *parser);
 static No *parsear_for(Parser *parser);
+static No *parsear_forma_macro(Parser *parser);
+static No *parsear_expansao_macro(Parser *parser);
 static No *parsear_declaracao(Parser *parser);
 static No *parsear_instrucao(Parser *parser);
 static No *parsear_expressao(Parser *parser);
@@ -108,6 +111,38 @@ static void chamada_adicionar_argumento(No *chamada, No *argumento) {
         }
     }
     chamada->como.chamada.argumentos[chamada->como.chamada.quantidade_argumentos++] = argumento;
+}
+
+static void expansao_macro_adicionar_argumento(No *expansao, No *argumento) {
+    if (expansao->como.expansao_macro.quantidade_argumentos >= expansao->como.expansao_macro.capacidade_argumentos) {
+        expansao->como.expansao_macro.capacidade_argumentos =
+            expansao->como.expansao_macro.capacidade_argumentos == 0 ? 4 : expansao->como.expansao_macro.capacidade_argumentos * 2;
+        expansao->como.expansao_macro.argumentos = realloc(
+            expansao->como.expansao_macro.argumentos,
+            (size_t)expansao->como.expansao_macro.capacidade_argumentos * sizeof(No *));
+        if (expansao->como.expansao_macro.argumentos == NULL) {
+            noema_falhar("memoria insuficiente");
+        }
+    }
+    expansao->como.expansao_macro.argumentos[expansao->como.expansao_macro.quantidade_argumentos++] = argumento;
+}
+
+static double parsear_literal_numero(const char *literal) {
+    if (literal[0] == '0' && (literal[1] == 'x' || literal[1] == 'X')) {
+        return (double)strtoull(literal + 2, NULL, 16);
+    }
+    return strtod(literal, NULL);
+}
+
+static void plugin_adicionar_biblioteca(No *plugin, const char *biblioteca) {
+    int quantidade = plugin->como.plugin.quantidade_bibliotecas;
+    char **bibliotecas = realloc(plugin->como.plugin.bibliotecas, (size_t)(quantidade + 1) * sizeof(char *));
+    if (bibliotecas == NULL) {
+        noema_falhar("memoria insuficiente");
+    }
+    plugin->como.plugin.bibliotecas = bibliotecas;
+    plugin->como.plugin.bibliotecas[quantidade] = noema_duplicar(biblioteca);
+    plugin->como.plugin.quantidade_bibliotecas++;
 }
 
 static Token avancar(Parser *parser) {
@@ -274,6 +309,25 @@ static No *parsear_declaracao_funcao(Parser *parser) {
     return funcao;
 }
 
+static No *parsear_declaracao_macro(Parser *parser) {
+    Token nome = consumir(parser, TOKEN_IDENTIFICADOR, "macro exige nome");
+    char **parametros = NULL;
+    int quantidade_parametros = 0;
+    bool corpo_em_linha = false;
+    parsear_parametros_funcao(parser, &parametros, &quantidade_parametros);
+    No *corpo = parsear_corpo_funcao(parser, &corpo_em_linha);
+
+    No *macro = novo_no(NO_DECL_MACRO, nome.linha);
+    macro->como.declaracao_macro.nome = noema_duplicar(nome.lexema);
+    macro->como.declaracao_macro.parametros = parametros;
+    macro->como.declaracao_macro.quantidade_parametros = quantidade_parametros;
+    macro->como.declaracao_macro.corpo = corpo;
+    if (corpo_em_linha) {
+        consumir_terminador_instrucao(parser, "macro exige terminador");
+    }
+    return macro;
+}
+
 static No *parsear_funcao_anonima(Parser *parser) {
     int linha = parser->anterior.linha;
     char **parametros = NULL;
@@ -290,6 +344,42 @@ static No *parsear_funcao_anonima(Parser *parser) {
     return funcao;
 }
 
+static No *parsear_template_sintaxe(Parser *parser) {
+    bool em_template_anterior = parser->em_template_sintaxe;
+    parser->em_template_sintaxe = true;
+
+    No *corpo = parsear_forma_macro(parser);
+
+    parser->em_template_sintaxe = em_template_anterior;
+
+    No *template = novo_no(NO_SYNTAX_TEMPLATE, parser->anterior.linha);
+    template->como.template_sintaxe.corpo = corpo;
+    return template;
+}
+
+static No *parsear_expansao_macro(Parser *parser) {
+    Token nome = consumir(parser, TOKEN_IDENTIFICADOR, "expand exige nome de macro");
+    consumir(parser, TOKEN_ABRE_PAREN, "expand exige '('");
+
+    No *expansao = novo_no(NO_EXPAND, nome.linha);
+    expansao->como.expansao_macro.nome = noema_duplicar(nome.lexema);
+
+    if (!conferir(parser, TOKEN_FECHA_PAREN)) {
+        for (;;) {
+            expansao_macro_adicionar_argumento(expansao, parsear_forma_macro(parser));
+            if (!combinar(parser, TOKEN_VIRGULA)) {
+                break;
+            }
+            if (conferir(parser, TOKEN_FECHA_PAREN)) {
+                break;
+            }
+        }
+    }
+
+    consumir(parser, TOKEN_FECHA_PAREN, "expand exige ')'");
+    return expansao;
+}
+
 static No *parsear_declaracao_plugin(Parser *parser) {
     Token nome = consumir(parser, TOKEN_IDENTIFICADOR, "plugin exige nome");
     consumir(parser, TOKEN_ABRE_CHAVE, "plugin exige '{'");
@@ -301,8 +391,13 @@ static No *parsear_declaracao_plugin(Parser *parser) {
 
     while (!conferir(parser, TOKEN_FECHA_CHAVE) && !conferir(parser, TOKEN_EOF)) {
         if (combinar(parser, TOKEN_LIBRARY)) {
-            Token biblioteca = consumir(parser, TOKEN_TEXTO, "library exige um texto");
-            plugin->como.plugin.biblioteca = noema_duplicar(biblioteca.literal);
+            for (;;) {
+                Token biblioteca = consumir(parser, TOKEN_TEXTO, "library exige um texto");
+                plugin_adicionar_biblioteca(plugin, biblioteca.literal);
+                if (!combinar(parser, TOKEN_VIRGULA)) {
+                    break;
+                }
+            }
             consumir_terminador_instrucao(parser, "library exige terminador");
             continue;
         }
@@ -335,8 +430,11 @@ static No *parsear_declaracao_plugin(Parser *parser) {
             consumir(parser, TOKEN_FECHA_PAREN, "bind exige ')'");
             consumir(parser, TOKEN_SETA, "bind exige '->'");
             Token retorno = consumir(parser, TOKEN_IDENTIFICADOR, "bind exige tipo de retorno");
-            consumir(parser, TOKEN_AS, "bind exige 'as'");
-            Token simbolo = consumir(parser, TOKEN_TEXTO, "bind exige o simbolo em texto");
+            const char *nome_simbolo = local.lexema;
+            if (combinar(parser, TOKEN_AS)) {
+                Token simbolo = consumir(parser, TOKEN_TEXTO, "bind exige o simbolo em texto");
+                nome_simbolo = simbolo.literal;
+            }
             consumir_terminador_instrucao(parser, "bind exige terminador");
 
             if (plugin->como.plugin.quantidade_ligacoes >= capacidade_ligacoes) {
@@ -350,7 +448,7 @@ static No *parsear_declaracao_plugin(Parser *parser) {
 
             LigacaoPluginAst *ligacao = &plugin->como.plugin.ligacoes[plugin->como.plugin.quantidade_ligacoes++];
             ligacao->nome_noema = noema_duplicar(local.lexema);
-            ligacao->nome_simbolo = noema_duplicar(simbolo.literal);
+            ligacao->nome_simbolo = noema_duplicar(nome_simbolo);
             ligacao->retorno = parsear_tipo_ffi(retorno.lexema);
             ligacao->argumentos = argumentos;
             ligacao->quantidade_argumentos = quantidade_argumentos;
@@ -361,8 +459,8 @@ static No *parsear_declaracao_plugin(Parser *parser) {
     }
 
     consumir(parser, TOKEN_FECHA_CHAVE, "plugin exige '}'");
-    if (plugin->como.plugin.biblioteca == NULL) {
-        noema_falhar("plugin '%s' precisa de uma clausula library", plugin->como.plugin.nome);
+    if (plugin->como.plugin.quantidade_bibliotecas == 0) {
+        noema_falhar("plugin '%s' precisa de ao menos uma clausula library", plugin->como.plugin.nome);
     }
     return plugin;
 }
@@ -420,6 +518,41 @@ static No *parsear_for(Parser *parser) {
     return no;
 }
 
+static No *parsear_forma_macro(Parser *parser) {
+    if (conferir(parser, TOKEN_ABRE_CHAVE) ||
+        conferir(parser, TOKEN_IF) ||
+        conferir(parser, TOKEN_UNLESS) ||
+        conferir(parser, TOKEN_WHILE) ||
+        conferir(parser, TOKEN_FOR) ||
+        conferir(parser, TOKEN_RETURN) ||
+        conferir(parser, TOKEN_BREAK) ||
+        conferir(parser, TOKEN_CONTINUE)) {
+        return parsear_instrucao(parser);
+    }
+
+    if (combinar(parser, TOKEN_FUNCTION)) {
+        if (conferir(parser, TOKEN_IDENTIFICADOR)) {
+            return parsear_declaracao_funcao(parser);
+        }
+        return parsear_funcao_anonima(parser);
+    }
+
+    if (combinar(parser, TOKEN_PLUGIN)) {
+        return parsear_declaracao_plugin(parser);
+    }
+    if (combinar(parser, TOKEN_MACRO)) {
+        return parsear_declaracao_macro(parser);
+    }
+    if (combinar(parser, TOKEN_LET)) {
+        return parsear_declaracao_variavel(parser, NO_DECL_LET);
+    }
+    if (combinar(parser, TOKEN_CONST)) {
+        return parsear_declaracao_variavel(parser, NO_DECL_CONST);
+    }
+
+    return parsear_expressao(parser);
+}
+
 static No *parsear_return(Parser *parser) {
     Token inicio = parser->anterior;
     No *no = novo_no(NO_RETURN, inicio.linha);
@@ -471,9 +604,25 @@ static No *parsear_instrucao(Parser *parser) {
 }
 
 static No *parsear_primario(Parser *parser) {
+    if (parser->em_template_sintaxe && combinar(parser, TOKEN_DOLAR)) {
+        No *placeholder = novo_no(NO_SYNTAX_PLACEHOLDER, parser->anterior.linha);
+        if (combinar(parser, TOKEN_IDENTIFICADOR)) {
+            placeholder->como.placeholder_sintaxe.nome = noema_duplicar(parser->anterior.lexema);
+            return placeholder;
+        }
+        if (combinar(parser, TOKEN_ABRE_PAREN)) {
+            bool em_template_anterior = parser->em_template_sintaxe;
+            parser->em_template_sintaxe = false;
+            placeholder->como.placeholder_sintaxe.expressao = parsear_expressao(parser);
+            parser->em_template_sintaxe = em_template_anterior;
+            consumir(parser, TOKEN_FECHA_PAREN, "placeholder de sintaxe exige ')'");
+            return placeholder;
+        }
+        noema_falhar("placeholder de sintaxe exige identificador ou expressao entre parenteses");
+    }
     if (combinar(parser, TOKEN_NUMERO)) {
         No *no = novo_no(NO_LITERAL, parser->anterior.linha);
-        no->como.literal.valor = valor_numero(strtod(parser->anterior.literal, NULL));
+        no->como.literal.valor = valor_numero(parsear_literal_numero(parser->anterior.literal));
         return no;
     }
     if (combinar(parser, TOKEN_TEXTO)) {
@@ -495,6 +644,12 @@ static No *parsear_primario(Parser *parser) {
         No *no = novo_no(NO_LITERAL, parser->anterior.linha);
         no->como.literal.valor = valor_nulo();
         return no;
+    }
+    if (combinar(parser, TOKEN_EXPAND)) {
+        return parsear_expansao_macro(parser);
+    }
+    if (combinar(parser, TOKEN_SYNTAX)) {
+        return parsear_template_sintaxe(parser);
     }
     if (combinar(parser, TOKEN_FUNCTION)) {
         return parsear_funcao_anonima(parser);
@@ -718,6 +873,9 @@ static No *parsear_declaracao(Parser *parser) {
     }
     if (combinar(parser, TOKEN_PLUGIN)) {
         return parsear_declaracao_plugin(parser);
+    }
+    if (combinar(parser, TOKEN_MACRO)) {
+        return parsear_declaracao_macro(parser);
     }
     if (combinar(parser, TOKEN_LET)) {
         return parsear_declaracao_variavel(parser, NO_DECL_LET);
