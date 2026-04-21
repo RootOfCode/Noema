@@ -1,0 +1,45 @@
+function read_text(path) {
+    return read_file(path)
+}
+
+function write_text(path, content) {
+    return write_file(path, content)
+}
+
+function append_text(path, content) {
+    return append_file(path, content)
+}
+
+function read_lines(path) {
+    return split(read_text(path), "\n")
+}
+
+function list(path) {
+    if path == null {
+        return list_dir(".")
+    }
+    return list_dir(path)
+}
+
+function mkdir(path) {
+    return make_dir(path)
+}
+
+function mkdir_p(path) {
+    return make_dir(path, true)
+}
+
+const FS = {
+    cwd: cwd,
+    chdir: change_dir,
+    exists: file_exists,
+    is_file: is_file,
+    is_dir: is_dir,
+    list: list,
+    mkdir: mkdir,
+    mkdir_p: mkdir_p,
+    read_text: read_text,
+    write_text: write_text,
+    append_text: append_text,
+    read_lines: read_lines
+}

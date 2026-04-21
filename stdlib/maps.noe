@@ -1,0 +1,73 @@
+function clone_map(map_value) {
+    let out = {}
+    each key in keys(map_value) {
+        out[key] = map_value[key]
+    }
+    return out
+}
+
+function merge_maps(left, right) {
+    let out = clone_map(left)
+    each key in keys(right) {
+        out[key] = right[key]
+    }
+    return out
+}
+
+function entries(map_value) {
+    let out = []
+    each key in keys(map_value) {
+        push(out, {key: key, value: map_value[key]})
+    }
+    return out
+}
+
+function from_entries(entries_list) {
+    let out = {}
+    each entry in entries_list {
+        out[entry.key] = entry.value
+    }
+    return out
+}
+
+function pick(map_value, selected_keys) {
+    let out = {}
+    each key in selected_keys {
+        if has(map_value, key) {
+            out[key] = map_value[key]
+        }
+    }
+    return out
+}
+
+function omit(map_value, blocked_keys) {
+    let out = {}
+    each key in keys(map_value) {
+        if not contains_item(blocked_keys, key) {
+            out[key] = map_value[key]
+        }
+    }
+    return out
+}
+
+function invert(map_value) {
+    let out = {}
+    each key in keys(map_value) {
+        out[string(map_value[key])] = key
+    }
+    return out
+}
+
+const Maps = {
+    keys: keys,
+    values: values,
+    get: get,
+    has: has,
+    clone: clone_map,
+    merge: merge_maps,
+    entries: entries,
+    from_entries: from_entries,
+    pick: pick,
+    omit: omit,
+    invert: invert
+}

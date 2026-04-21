@@ -1,0 +1,270 @@
+use "std/rules"
+
+const MYCIN_SYMPTOMS = [
+    "fever",
+    "rash",
+    "cough",
+    "chest_pain",
+    "sore_throat",
+    "swollen_glands"
+]
+
+const MYCIN_DIAGNOSES = [
+    "bacterial_pneumonia",
+    "streptococcal_pharyngitis",
+    "viral_exanthem"
+]
+
+const MYCIN_THERAPIES = [
+    "penicillin",
+    "chest_xray",
+    "blood_culture",
+    "isolation"
+]
+
+fn conclude_many(pairs) {
+    return fn (kb, _) {
+        each pair in pairs {
+            Rules.update(kb, pair.name, pair.score)
+        }
+        return true
+    }
+}
+
+fn build_doctor() {
+    let kb = Rules.create("MYCIN")
+    kb.questions = [
+        {
+            fact: "fever",
+            prompt: "Does the patient have a high fever?",
+            why: "Fever is a major clue for infection and helps discriminate several hypotheses."
+        },
+        {
+            fact: "rash",
+            prompt: "Does the patient have a diffuse rash?",
+            why: "A rash changes the diagnostic path toward systemic or viral causes."
+        },
+        {
+            fact: "cough",
+            prompt: "Does the patient have a productive cough?",
+            why: "A productive cough is important evidence for pneumonia."
+        },
+        {
+            fact: "chest_pain",
+            prompt: "Does the patient have pleuritic chest pain?",
+            why: "Chest pain strengthens the case for lower respiratory infection."
+        },
+        {
+            fact: "sore_throat",
+            prompt: "Does the patient have a sore throat?",
+            why: "Sore throat is a key sign in streptococcal disease."
+        },
+        {
+            fact: "swollen_glands",
+            prompt: "Are the cervical glands swollen?",
+            why: "Swollen glands help distinguish streptococcal pharyngitis."
+        }
+    ]
+    kb.derived = List.concat(MYCIN_DIAGNOSES, MYCIN_THERAPIES)
+
+    Rules.rule(kb, "pneumonia_from_cough_fever", fn (current, _) {
+        return Rules.present(current, "cough", 0.6) and Rules.present(current, "fever", 0.6)
+    }, Rules.conclude("bacterial_pneumonia", 0.65))
+
+    Rules.rule(kb, "pneumonia_from_chest_pain", fn (current, _) {
+        return Rules.present(current, "bacterial_pneumonia", 0.5) and Rules.present(current, "chest_pain", 0.5)
+    }, Rules.conclude("bacterial_pneumonia", 0.2))
+
+    Rules.rule(kb, "strep_from_throat", fn (current, _) {
+        return Rules.present(current, "sore_throat", 0.6) and Rules.present(current, "swollen_glands", 0.6)
+    }, Rules.conclude("streptococcal_pharyngitis", 0.75))
+
+    Rules.rule(kb, "strep_from_fever", fn (current, _) {
+        return Rules.present(current, "streptococcal_pharyngitis", 0.5) and Rules.present(current, "fever", 0.4)
+    }, Rules.conclude("streptococcal_pharyngitis", 0.15))
+
+    Rules.rule(kb, "viral_from_rash_fever", fn (current, _) {
+        return Rules.present(current, "rash", 0.6) and Rules.present(current, "fever", 0.4)
+    }, Rules.conclude("viral_exanthem", 0.6))
+
+    Rules.rule(kb, "viral_less_likely_with_cough", fn (current, _) {
+        return Rules.present(current, "viral_exanthem", 0.4) and Rules.present(current, "cough", 0.6)
+    }, Rules.conclude("viral_exanthem", -0.2))
+
+    Rules.rule(kb, "recommend_penicillin", fn (current, _) {
+        return Rules.present(current, "streptococcal_pharyngitis", 0.5)
+    }, Rules.conclude("penicillin", 0.9))
+
+    Rules.rule(kb, "recommend_xray", fn (current, _) {
+        return Rules.present(current, "bacterial_pneumonia", 0.5)
+    }, conclude_many([
+        {name: "chest_xray", score: 0.8},
+        {name: "blood_culture", score: 0.5}
+    ]))
+
+    Rules.rule(kb, "recommend_isolation", fn (current, _) {
+        return Rules.present(current, "viral_exanthem", 0.5)
+    }, Rules.conclude("isolation", 0.6))
+
+    return kb
+}
+
+fn consult_patient(kb) {
+    print("mycin: Consultation started. Answer yes, no, unknown, maybe, unlikely, or a number between -1 and 1.")
+    print("mycin: Type why during a question to see the reason for it.")
+    each question in kb.questions {
+        let answer = Rules.ask_certainty(question.prompt, question.why)
+        if answer != null {
+            Rules.set(kb, question.fact, answer)
+        } else {
+            Rules.set(kb, question.fact, null)
+        }
+    }
+    Rules.infer(kb, 16, kb.derived)
+    return kb
+}
+
+fn ranking_lines(label, ranking) {
+    print(label)
+    each item in ranking {
+        if item.score > 0 {
+            print("  ", item.name, "=", item.score)
+        }
+    }
+    return null
+}
+
+fn show_facts(kb) {
+    each name in List.concat(MYCIN_SYMPTOMS, List.concat(MYCIN_DIAGNOSES, MYCIN_THERAPIES)) {
+        let value = Rules.get(kb, name, null)
+        if value != null {
+            print(name, "=", value)
+        }
+    }
+    return null
+}
+
+fn infer_doctor(kb) {
+    Rules.infer(kb, 16, kb.derived)
+    return kb
+}
+
+fn parse_manual_value(text) {
+    let parsed = Rules.parse_certainty(text)
+    if parsed != null {
+        return parsed
+    }
+    if Patterns.normalize(text) == "unknown" or Patterns.normalize(text) == "null" {
+        return null
+    }
+    return text
+}
+
+fn doctor_report(kb) {
+    ranking_lines("diagnoses:", Rules.rank(kb, MYCIN_DIAGNOSES))
+    ranking_lines("therapies:", Rules.rank(kb, MYCIN_THERAPIES))
+    return null
+}
+
+fn mycin_help(_, __) {
+    print("Commands:")
+    print("  consult")
+    print("  infer")
+    print("  diagnosis")
+    print("  therapy")
+    print("  facts")
+    print("  how")
+    print("  reset")
+    print("  get <fact>")
+    print("  what is <fact>")
+    print("  set <fact> <value>")
+    print("  set <fact> to <value>")
+    print("Values: yes, no, unknown, maybe, unlikely, or numbers between -1 and 1.")
+    print("Type bye to leave.")
+}
+
+var doctor = build_doctor()
+
+fn mycin_line(line, _) {
+    let normalized = Patterns.normalize(line)
+
+    if normalized == "help" {
+        mycin_help(null, 0)
+        return null
+    }
+
+    if normalized == "reset" {
+        doctor = build_doctor()
+        return "mycin: consultation reset."
+    }
+
+    if normalized == "consult" {
+        consult_patient(doctor)
+        doctor_report(doctor)
+        return "mycin: consultation complete."
+    }
+
+    if normalized == "infer" {
+        infer_doctor(doctor)
+        return "mycin: inference complete."
+    }
+
+    if normalized == "facts" {
+        show_facts(doctor)
+        return null
+    }
+
+    if normalized == "diagnosis" or normalized == "diagnoses" {
+        ranking_lines("diagnoses:", Rules.rank(doctor, MYCIN_DIAGNOSES))
+        return null
+    }
+
+    if normalized == "therapy" or normalized == "treatment" or normalized == "therapies" {
+        ranking_lines("therapies:", Rules.rank(doctor, MYCIN_THERAPIES))
+        return null
+    }
+
+    if normalized == "how" or normalized == "trace" {
+        return "mycin: fired rules = #{Rules.trace(doctor)}"
+    }
+
+    if normalized == "why" {
+        return "mycin: use why while answering a consult question."
+    }
+
+    let set_to = Patterns.match("set * to *", line, {})
+    if set_to.ok {
+        let name = Patterns.normalize(set_to.captures[0])
+        let value = parse_manual_value(set_to.captures[1])
+        Rules.set(doctor, name, value)
+        return "mycin: #{name} = #{value}"
+    }
+
+    let set_plain = Patterns.match("set * *", line, {})
+    if set_plain.ok {
+        let name = Patterns.normalize(set_plain.captures[0])
+        let value = parse_manual_value(set_plain.captures[1])
+        Rules.set(doctor, name, value)
+        return "mycin: #{name} = #{value}"
+    }
+
+    let what_is = Patterns.match("what is *", line, {})
+    if not what_is.ok {
+        what_is = Patterns.match("get *", line, {})
+    }
+    if what_is.ok {
+        let name = Patterns.normalize(what_is.captures[0])
+        return "mycin: #{name} = #{Rules.get(doctor, name, null)}"
+    }
+
+    return "mycin: unknown command. Type help."
+}
+
+REPL.start({
+    banner: "MYCIN ready. Type help for commands or bye to exit.",
+    prompt: "mycin> ",
+    exit: "bye",
+    quiet: true,
+    on_help: mycin_help,
+    on_line: mycin_line
+})

@@ -1,0 +1,63 @@
+function pipe(value, steps) {
+    let current = value
+    each step in steps {
+        current = step(current, 0)
+    }
+    return current
+}
+
+function compose(steps) {
+    return fn (value, _) {
+        let current = value
+        let index = len(steps) - 1
+        while index >= 0 {
+            current = steps[index](current, index)
+            index = index - 1
+        }
+        return current
+    }
+}
+
+function tap(value, callback) {
+    callback(value, 0)
+    return value
+}
+
+function once(callback) {
+    let called = false
+    let stored = null
+    return fn (value, _) {
+        if not called {
+            stored = callback(value, 0)
+            called = true
+        }
+        return stored
+    }
+}
+
+function memoize(callback) {
+    let cache = {}
+    return fn (value, _) {
+        let key = string(value)
+        if has(cache, key) {
+            return cache[key]
+        }
+        cache[key] = callback(value, 0)
+        return cache[key]
+    }
+}
+
+function constantly(value) {
+    return fn (_, __) {
+        return value
+    }
+}
+
+const Fn = {
+    pipe: pipe,
+    compose: compose,
+    tap: tap,
+    once: once,
+    memoize: memoize,
+    constantly: constantly
+}

@@ -1,0 +1,212 @@
+use "std/dialogue"
+
+const ELIZA_REFLECTIONS = {
+    am: "are",
+    was: "were",
+    i: "you",
+    me: "you",
+    my: "your",
+    mine: "yours",
+    myself: "yourself",
+    you: "I",
+    your: "my",
+    yours: "mine",
+    yourself: "myself",
+    im: "you are"
+}
+
+fn eliza_mirror(text) {
+    return Patterns.reflect(text, ELIZA_REFLECTIONS)
+}
+
+fn eliza_store_memory(session, text) {
+    Dialogue.push_memory(session, "memory_queue", text)
+    return text
+}
+
+fn eliza_recall_memory(session) {
+    return Dialogue.pop_memory(session, "memory_queue")
+}
+
+fn eliza_family_reply(person, session) {
+    let subject = eliza_mirror(person)
+    eliza_store_memory(session, "Earlier you mentioned #{subject}.")
+    return choice([
+        "Tell me more about your family.",
+        "Who else in your family #{subject}?",
+        "How do you feel about your family?"
+    ])
+}
+
+fn eliza_fallback(_, session, __, ___) {
+    let remembered = eliza_recall_memory(session)
+    if remembered != null and rand() > 0.35 {
+        return remembered
+    }
+    return choice([
+        "Please go on.",
+        "Can you elaborate on that?",
+        "Does talking about this trouble you?",
+        "I see. Tell me more."
+    ])
+}
+
+const ELIZA_RULES = [
+    Dialogue.rule("hello", [
+        "How do you do. Please state your problem.",
+        "How do you do. What seems to be troubling you?"
+    ], {priority: 100}),
+    Dialogue.rule("hello *", [
+        "How do you do. Please state your problem.",
+        "Hello. What would you like to discuss?"
+    ], {priority: 100}),
+    Dialogue.rule("sorry *", [
+        "Please do not apologize.",
+        "Apologies are not necessary.",
+        "What feelings do you have when you apologize?"
+    ], {priority: 95}),
+    Dialogue.rule("i remember *", fn (match, session) {
+        let thought = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "Does anything else remind you of #{thought}?")
+        return choice([
+            "Do you often think of #{thought}?",
+            "Does thinking of #{thought} bring anything else to mind?",
+            "What in the present reminds you of #{thought}?"
+        ])
+    }, {priority: 92}),
+    Dialogue.rule("do you remember *", fn (match, session) {
+        let subject = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "Why do you want me to remember #{subject}?")
+        return choice([
+            "Did you think I would forget #{subject}?",
+            "Why do you ask whether I remember #{subject}?",
+            "What about #{subject}?"
+        ])
+    }, {priority: 91}),
+    Dialogue.rule("i dream *", fn (match, session) {
+        let subject = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "Have you ever fantasized about #{subject} while awake?")
+        return choice([
+            "What does #{subject} suggest to you?",
+            "Do you dream often?",
+            "How do you feel about #{subject} in your dreams?"
+        ])
+    }, {priority: 90}),
+    Dialogue.rule("dream *", [
+        "What does this dream suggest to you?",
+        "Do you believe dreams have something to do with your problem?",
+        "Have you had similar dreams before?"
+    ], {priority: 89}),
+    Dialogue.rule("my mother *", fn (match, session) {
+        return eliza_family_reply("my mother #{match.captures[0]}", session)
+    }, {priority: 88}),
+    Dialogue.rule("my father *", fn (match, session) {
+        return eliza_family_reply("my father #{match.captures[0]}", session)
+    }, {priority: 88}),
+    Dialogue.rule("my *", fn (match, session) {
+        let subject = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "Why do you say your #{subject}?")
+        return choice([
+            "Your #{subject}?",
+            "Why are you concerned about your #{subject}?",
+            "What does your #{subject} suggest to you?"
+        ])
+    }, {priority: 84}),
+    Dialogue.rule("i am *", fn (match, session) {
+        let state = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "How long have you been #{state}?")
+        return choice([
+            "How long have you been #{state}?",
+            "Do you believe it is normal to be #{state}?",
+            "How do you feel about being #{state}?"
+        ])
+    }, {priority: 82}),
+    Dialogue.rule("im *", fn (match, session) {
+        let state = eliza_mirror(match.captures[0])
+        return choice([
+            "How long have you been #{state}?",
+            "Why do you tell me you are #{state} now?",
+            "How does being #{state} make you feel?"
+        ])
+    }, {priority: 82}),
+    Dialogue.rule("i feel *", fn (match, session) {
+        let feeling = eliza_mirror(match.captures[0])
+        eliza_store_memory(session, "Do you often feel #{feeling}?")
+        return choice([
+            "Tell me more about feeling #{feeling}.",
+            "Do you often feel #{feeling}?",
+            "When do you usually feel #{feeling}?"
+        ])
+    }, {priority: 81}),
+    Dialogue.rule("i need *", fn (match, session) {
+        let need = eliza_mirror(match.captures[0])
+        return choice([
+            "Why do you need #{need}?",
+            "Would it really help you to get #{need}?",
+            "What would it mean if you got #{need}?"
+        ])
+    }, {priority: 80}),
+    Dialogue.rule("because *", fn (match, session) {
+        let reason = eliza_mirror(match.captures[0])
+        return choice([
+            "Is that the real reason?",
+            "What other reasons come to mind besides #{reason}?",
+            "Does #{reason} explain anything else?"
+        ])
+    }, {priority: 78}),
+    Dialogue.rule("why cant i *", fn (match, session) {
+        let wish = eliza_mirror(match.captures[0])
+        return choice([
+            "Do you think you should be able to #{wish}?",
+            "What would it mean to you if you could #{wish}?",
+            "Why do you believe you cannot #{wish}?"
+        ])
+    }, {priority: 77}),
+    Dialogue.rule("can you *", fn (match, session) {
+        let request = eliza_mirror(match.captures[0])
+        return choice([
+            "You believe I can #{request}?",
+            "Perhaps you would like to #{request} yourself.",
+            "Why do you ask if I can #{request}?"
+        ])
+    }, {priority: 76}),
+    Dialogue.rule("you are *", fn (match, session) {
+        let description = eliza_mirror(match.captures[0])
+        return choice([
+            "What makes you think I am #{description}?",
+            "Does it please you to believe I am #{description}?",
+            "Would you prefer if I were not #{description}?"
+        ])
+    }, {priority: 75}),
+    Dialogue.rule("everyone *", [
+        "Really, everyone?",
+        "Can you think of anyone in particular?",
+        "Who, for example?"
+    ], {priority: 70}),
+    Dialogue.rule("always *", [
+        "Can you think of a specific example?",
+        "When?",
+        "Really, always?"
+    ], {priority: 69})
+]
+
+fn eliza_help(_, __) {
+    print("ELIZA-style psychotherapy script.")
+    print("Examples: I feel anxious, I remember my mother, Because nobody listens.")
+    print("Type bye to leave.")
+}
+
+Dialogue.start({
+    banner: "ELIZA ready. Type bye to exit.",
+    prompt: "eliza> ",
+    exit: "bye",
+    quiet: true,
+    prefix: "eliza: ",
+    rules: ELIZA_RULES,
+    fallback: eliza_fallback,
+    on_help: eliza_help,
+    session: Dialogue.create({
+        name: "ELIZA",
+        fallback: eliza_fallback
+    })
+})

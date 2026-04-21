@@ -1,0 +1,241 @@
+use "std/core"
+use "std/maps"
+use "std/repl"
+use "std/patterns"
+
+function create_session(options) {
+    let config = default(options, {})
+    let topic = get(config, "topic", null)
+    let memory = {}
+    if type(get(config, "memory", null)) == "map" {
+        memory = Maps.clone(get(config, "memory", null))
+    }
+    if topic != null {
+        topic = Patterns.normalize(topic)
+    }
+    return {
+        name: get(config, "name", "agent"),
+        topic: topic,
+        memory: memory,
+        history: [],
+        turns: 0,
+        fallback: get(config, "fallback", null)
+    }
+}
+
+function dialogue_remember(session, key, value) {
+    session.memory[key] = value
+    return value
+}
+
+function dialogue_recall(session, key, fallback) {
+    if has(session.memory, key) and session.memory[key] != null {
+        return session.memory[key]
+    }
+    return fallback
+}
+
+function dialogue_push_memory(session, key, value) {
+    let bucket = dialogue_recall(session, key, null)
+    if bucket == null {
+        bucket = []
+        dialogue_remember(session, key, bucket)
+    }
+    push(bucket, value)
+    return value
+}
+
+function dialogue_pop_memory(session, key) {
+    let bucket = dialogue_recall(session, key, null)
+    if bucket == null or len(bucket) == 0 {
+        return null
+    }
+    return pop(bucket)
+}
+
+function dialogue_set_topic(session, topic) {
+    if topic == null {
+        session.topic = null
+    } else {
+        session.topic = Patterns.normalize(topic)
+    }
+    return session.topic
+}
+
+function dialogue_record(session, speaker, text) {
+    push(session.history, {speaker: speaker, text: text})
+    if speaker == "user" {
+        session.turns = session.turns + 1
+    }
+    return text
+}
+
+function dialogue_last_message(session, speaker) {
+    let index = len(session.history) - 1
+    while index >= 0 {
+        let item = session.history[index]
+        if speaker == null or item.speaker == speaker {
+            return item
+        }
+        index = index - 1
+    }
+    return null
+}
+
+function dialogue_rule(pattern, reply, meta) {
+    let info = {}
+    if type(meta) == "map" {
+        info = Maps.clone(meta)
+    }
+    info.pattern = pattern
+    info.reply = reply
+    if info.priority == null {
+        info.priority = 0
+    }
+    return info
+}
+
+function dialogue_context(session, match_value, line, extra) {
+    let out = {}
+    if session != null {
+        out.agent = session.name
+        out.topic = session.topic
+        out.turns = session.turns
+        each key in keys(session.memory) {
+            out[key] = session.memory[key]
+        }
+    }
+    if match_value != null {
+        out.input = match_value.text
+        out.raw_input = match_value.raw_text
+        out.captures = match_value.captures
+        each index in range(0, len(match_value.captures)) {
+            out[string(index + 1)] = match_value.captures[index]
+        }
+    } elif line != null {
+        out.input = Patterns.normalize(line)
+        out.raw_input = line
+    }
+    if type(extra) == "map" {
+        each key in keys(extra) {
+            out[key] = extra[key]
+        }
+    }
+    return out
+}
+
+function pick_reply(reply) {
+    if type(reply) == "list" {
+        return choice(reply)
+    }
+    return reply
+}
+
+function resolve_reply(session, reply, match_value, line, rule_value) {
+    let current = pick_reply(reply)
+    if type(current) == "function" {
+        current = current(match_value, session, line, rule_value)
+    }
+    current = pick_reply(current)
+    if type(current) == "string" {
+        return Patterns.fill(current, dialogue_context(session, match_value, line, get(rule_value, "vars", null)))
+    }
+    return current
+}
+
+function unpack_reply(session, value, line) {
+    if type(value) != "map" or not has(value, "reply") {
+        return value
+    }
+
+    let set_values = get(value, "set", null)
+    if type(set_values) == "map" {
+        each key in keys(set_values) {
+            dialogue_remember(session, key, set_values[key])
+        }
+    }
+
+    let push_values = get(value, "push", null)
+    if type(push_values) == "map" {
+        each key in keys(push_values) {
+            dialogue_push_memory(session, key, push_values[key])
+        }
+    }
+
+    if has(value, "topic") {
+        dialogue_set_topic(session, value.topic)
+    }
+
+    let reply_value = get(value, "reply", null)
+    if type(reply_value) == "string" {
+        return Patterns.fill(reply_value, dialogue_context(session, null, line, get(value, "vars", null)))
+    }
+    return reply_value
+}
+
+function dialogue_apply(session, rules, line, fallback) {
+    let raw_line = string(default(line, ""))
+    if Patterns.normalize(raw_line) == "" {
+        return null
+    }
+
+    dialogue_record(session, "user", raw_line)
+    let found = Patterns.first_match(rules, raw_line, session)
+    let reply_value = null
+    if found != null {
+        reply_value = resolve_reply(session, found.rule.reply, found.match, raw_line, found.rule)
+    } else {
+        reply_value = resolve_reply(session, default(fallback, session.fallback), null, raw_line, {})
+    }
+
+    reply_value = unpack_reply(session, reply_value, raw_line)
+    if reply_value != null {
+        dialogue_record(session, "agent", reply_value)
+    }
+    return reply_value
+}
+
+function dialogue_start(options) {
+    let config = default(options, {})
+    let session = default(get(config, "session", null), create_session({
+        name: get(config, "name", "agent"),
+        topic: get(config, "topic", null),
+        memory: get(config, "memory", null),
+        fallback: get(config, "fallback", null)
+    }))
+    let prefix = get(config, "prefix", null)
+    let rules = default(get(config, "rules", null), [])
+
+    return REPL.start({
+        banner: get(config, "banner", null),
+        prompt: get(config, "prompt", "agent> "),
+        exit: get(config, "exit", "bye"),
+        quiet: default(get(config, "quiet", null), true),
+        on_help: get(config, "on_help", null),
+        on_line: fn (line, _, __) {
+            let reply_value = dialogue_apply(session, rules, line, get(config, "fallback", null))
+            if reply_value == null {
+                return null
+            }
+            if prefix != null {
+                return "#{prefix}#{reply_value}"
+            }
+            return reply_value
+        }
+    })
+}
+
+const Dialogue = {
+    create: create_session,
+    remember: dialogue_remember,
+    recall: dialogue_recall,
+    push_memory: dialogue_push_memory,
+    pop_memory: dialogue_pop_memory,
+    set_topic: dialogue_set_topic,
+    record: dialogue_record,
+    last: dialogue_last_message,
+    rule: dialogue_rule,
+    context: dialogue_context,
+    apply: dialogue_apply,
+    start: dialogue_start
+}

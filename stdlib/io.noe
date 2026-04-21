@@ -1,0 +1,52 @@
+function println(value) {
+    print(value)
+    return value
+}
+
+function puts(value) {
+    print(value)
+    return value
+}
+
+function show(label, value) {
+    print(label, value)
+    return value
+}
+
+function inspect(value) {
+    print(value)
+    return value
+}
+
+function prompt(message) {
+    return read_line(message)
+}
+
+function ask(message, fallback) {
+    let value = read_line(message)
+    if value == null {
+        return fallback
+    }
+    return value
+}
+
+function confirm(message, fallback) {
+    let answer = lower(trim(string(ask(message, fallback))))
+    return answer == "y" or answer == "yes" or answer == "true" or answer == "1"
+}
+
+const IO = {
+    print: print,
+    println: println,
+    puts: puts,
+    write: write,
+    flush: flush,
+    show: show,
+    inspect: inspect,
+    prompt: prompt,
+    ask: ask,
+    confirm: confirm,
+    read_line: read_line,
+    read_stdin: read_stdin,
+    panic: panic
+}

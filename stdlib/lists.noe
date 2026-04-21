@@ -1,0 +1,190 @@
+function first(xs) {
+    return get(xs, 0)
+}
+
+function second(xs) {
+    return get(xs, 1)
+}
+
+function last(xs) {
+    return get(xs, -1)
+}
+
+function take(xs, count) {
+    return slice(xs, 0, count)
+}
+
+function drop(xs, count) {
+    return slice(xs, count)
+}
+
+function append(xs, item) {
+    let out = clone_list(xs)
+    push(out, item)
+    return out
+}
+
+function prepend(xs, item) {
+    let out = [item]
+    each value in xs {
+        push(out, value)
+    }
+    return out
+}
+
+function concat_lists(left, right) {
+    let out = clone_list(left)
+    each value in right {
+        push(out, value)
+    }
+    return out
+}
+
+function contains_item(xs, target) {
+    each value in xs {
+        if value == target {
+            return true
+        }
+    }
+    return false
+}
+
+function flatten(xs) {
+    let out = []
+    each value in xs {
+        if type(value) == "list" {
+            each inner in value {
+                push(out, inner)
+            }
+        } else {
+            push(out, value)
+        }
+    }
+    return out
+}
+
+function count_where(xs, predicate) {
+    let total = 0
+    each index in range(0, len(xs)) {
+        if predicate(xs[index], index) {
+            total = total + 1
+        }
+    }
+    return total
+}
+
+function unique(xs) {
+    let out = []
+    each value in xs {
+        if not contains_item(out, value) {
+            push(out, value)
+        }
+    }
+    return out
+}
+
+function zip(left, right) {
+    let out = []
+    let limit = min(len(left), len(right))
+    each index in range(0, limit) {
+        push(out, [left[index], right[index]])
+    }
+    return out
+}
+
+function chunk(xs, size) {
+    let out = []
+    let index = 0
+    while index < len(xs) {
+        push(out, slice(xs, index, index + size))
+        index = index + size
+    }
+    return out
+}
+
+function pluck(xs, key) {
+    let out = []
+    each item in xs {
+        push(out, item[key])
+    }
+    return out
+}
+
+function partition(xs, predicate) {
+    let yes = []
+    let no = []
+    each index in range(0, len(xs)) {
+        let item = xs[index]
+        if predicate(item, index) {
+            push(yes, item)
+        } else {
+            push(no, item)
+        }
+    }
+    return {yes: yes, no: no}
+}
+
+function group_by(xs, callback) {
+    let out = {}
+    each index in range(0, len(xs)) {
+        let item = xs[index]
+        let key = string(callback(item, index))
+        if out[key] == null {
+            out[key] = []
+        }
+        push(out[key], item)
+    }
+    return out
+}
+
+function sort_numbers(xs) {
+    let out = clone_list(xs)
+    let i = 0
+    while i < len(out) {
+        let j = 0
+        while j < len(out) - i - 1 {
+            if out[j] > out[j + 1] {
+                let temp = out[j]
+                out[j] = out[j + 1]
+                out[j + 1] = temp
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return out
+}
+
+const List = {
+    len: len,
+    get: get,
+    push: push,
+    pop: pop,
+    map: map,
+    filter: filter,
+    reduce: reduce,
+    find: find,
+    any: any,
+    all: all,
+    sum: sum,
+    reverse: reverse,
+    slice: slice,
+    first: first,
+    second: second,
+    last: last,
+    take: take,
+    drop: drop,
+    append: append,
+    prepend: prepend,
+    concat: concat_lists,
+    flatten: flatten,
+    count: count_where,
+    contains: contains_item,
+    unique: unique,
+    zip: zip,
+    chunk: chunk,
+    pluck: pluck,
+    partition: partition,
+    group_by: group_by,
+    sort_numbers: sort_numbers
+}

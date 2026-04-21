@@ -1,0 +1,94 @@
+function contains_text(text, part) {
+    return contains(text, part)
+}
+
+function normalize_input(text) {
+    return normalize_text(string(default(text, "")))
+}
+
+function lines(text) {
+    return split(text, "\n")
+}
+
+function words(text) {
+    return filter(split(trim(text), " "), fn (item, _) => item != "")
+}
+
+function blank(text) {
+    return trim(text) == ""
+}
+
+function word_swap(text, replacements) {
+    let table = default(replacements, {})
+    let out = []
+    each token in words(normalize_input(text)) {
+        if has(table, token) {
+            push(out, table[token])
+        } else {
+            push(out, token)
+        }
+    }
+    return join(out, " ")
+}
+
+function pad_left(text, width, fill) {
+    let token = default(fill, " ")
+    let out = string(text)
+    while len(out) < width {
+        out = token + out
+    }
+    return out
+}
+
+function pad_right(text, width, fill) {
+    let token = default(fill, " ")
+    let out = string(text)
+    while len(out) < width {
+        out = out + token
+    }
+    return out
+}
+
+function title_case(text) {
+    let out = []
+    each part in words(lower(text)) {
+        if len(part) == 0 {
+            push(out, part)
+        } else {
+            push(out, upper(slice(part, 0, 1)) + slice(part, 1))
+        }
+    }
+    return join(out, " ")
+}
+
+const Strings = {
+    string: string,
+    len: len,
+    lower: lower,
+    upper: upper,
+    trim: trim,
+    trim_left: trim_left,
+    trim_right: trim_right,
+    normalize: normalize_input,
+    split: split,
+    join: join,
+    replace: replace,
+    reverse: reverse,
+    slice: slice,
+    lines: lines,
+    words: words,
+    starts_with: starts_with,
+    ends_with: ends_with,
+    contains: contains_text,
+    blank: blank,
+    word_swap: word_swap,
+    repeat: repeat,
+    index_of: index_of,
+    last_index_of: last_index_of,
+    char_at: char_at,
+    ord: ord,
+    chr: chr,
+    pad_left: pad_left,
+    pad_right: pad_right,
+    title_case: title_case
+}

@@ -1,0 +1,42 @@
+function assert(condition, message) {
+    if not condition {
+        panic(default(message, "assertion failed"))
+    }
+    return true
+}
+
+function assert_eq(actual, expected, message) {
+    if actual != expected {
+        panic(default(message, "expected #{expected} but got #{actual}"))
+    }
+    return true
+}
+
+function assert_ne(actual, expected, message) {
+    if actual == expected {
+        panic(default(message, "did not expect #{expected}"))
+    }
+    return true
+}
+
+function assert_truthy(value, message) {
+    if not value {
+        panic(default(message, "expected a truthy value"))
+    }
+    return true
+}
+
+function assert_null(value, message) {
+    if value != null {
+        panic(default(message, "expected null but got #{value}"))
+    }
+    return true
+}
+
+const Assert = {
+    assert: assert,
+    eq: assert_eq,
+    ne: assert_ne,
+    truthy: assert_truthy,
+    is_null: assert_null
+}

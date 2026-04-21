@@ -1,0 +1,14 @@
+plugin Ncurses {
+    library "libncurses.so.6"
+    bind initscr() -> pointer as "initscr"
+    bind endwin() -> int as "endwin"
+    bind cbreak() -> int as "cbreak"
+    bind noecho() -> int as "noecho"
+    bind curs_set(int) -> int as "curs_set"
+    bind clear() -> int as "clear"
+    bind refresh() -> int as "refresh"
+    bind timeout(int) -> void as "timeout"
+    bind getch() -> int as "getch"
+    bind napms(int) -> int as "napms"
+    bind mvaddstr(int, int, string) -> int as "mvaddstr"
+}

@@ -1,0 +1,90 @@
+function shell_result(ok, code, output, command) {
+    return {
+        ok: ok,
+        code: code,
+        output: output,
+        command: command
+    }
+}
+
+function shell_create(options) {
+    let config = default(options, {})
+    return {
+        prompt: get(config, "prompt", "sh> "),
+        exit: get(config, "exit", "exit"),
+        quiet: get(config, "quiet", false)
+    }
+}
+
+function shell_builtin(line) {
+    if line == "pwd" {
+        return shell_result(true, 0, cwd() + "\n", line)
+    }
+
+    if starts_with(line, "cd ") {
+        let target = trim(slice(line, 3))
+        if target == "" {
+            return shell_result(false, 1, "usage: cd <path>\n", line)
+        }
+        let changed = change_dir(target)
+        if changed.ok {
+            return shell_result(true, 0, "", line)
+        }
+        return shell_result(false, 1, changed.error + "\n", line)
+    }
+
+    if line == "help" {
+        return shell_result(true, 0, "builtins: pwd, cd <path>, help, exit\n", line)
+    }
+
+    return null
+}
+
+function shell_run_line(line) {
+    let builtin = shell_builtin(line)
+    if builtin != null {
+        return builtin
+    }
+    return shell_run(line)
+}
+
+function shell_show(result) {
+    if result.output != "" {
+        write(result.output)
+        if not ends_with(result.output, "\n") {
+            print("")
+        }
+    }
+    return result
+}
+
+function shell_start(options) {
+    let state = shell_create(options)
+    if not state.quiet {
+        print("Shell ready. #{state.exit} or quit to exit.")
+    }
+
+    while true {
+        let line = read_line(state.prompt)
+        if line == null {
+            return null
+        }
+
+        line = trim(line)
+        if line == "" {
+            continue
+        }
+
+        if line == state.exit or line == "quit" {
+            return null
+        }
+
+        shell_show(shell_run_line(line))
+    }
+}
+
+const Shell = {
+    create: shell_create,
+    run: shell_run_line,
+    start: shell_start
+}

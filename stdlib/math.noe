@@ -1,0 +1,86 @@
+const PI = 3.141592653589793
+const TAU = 6.283185307179586
+const E = 2.718281828459045
+
+function clamp(value, low, high) {
+    if value < low {
+        return low
+    }
+    if value > high {
+        return high
+    }
+    return value
+}
+
+function lerp(a, b, t) {
+    return a + (b - a) * t
+}
+
+function inverse_lerp(a, b, value) {
+    if a == b {
+        return 0
+    }
+    return (value - a) / (b - a)
+}
+
+function normalize(value, low, high) {
+    return clamp(inverse_lerp(low, high, value), 0, 1)
+}
+
+function deg_to_rad(degrees) {
+    return degrees * PI / 180
+}
+
+function rad_to_deg(radians) {
+    return radians * 180 / PI
+}
+
+function distance2d(ax, ay, bx, by) {
+    let dx = bx - ax
+    let dy = by - ay
+    return sqrt(dx * dx + dy * dy)
+}
+
+function average(values) {
+    if len(values) == 0 {
+        return 0
+    }
+    return sum(values) / len(values)
+}
+
+const Math = {
+    pi: PI,
+    tau: TAU,
+    e: E,
+    sin: sin,
+    cos: cos,
+    tan: tan,
+    asin: asin,
+    acos: acos,
+    atan: atan,
+    atan2: atan2,
+    sqrt: sqrt,
+    hypot: hypot,
+    abs: abs,
+    floor: floor,
+    ceil: ceil,
+    round: round,
+    trunc: trunc,
+    pow: pow,
+    mod: mod,
+    sign: sign,
+    min: min,
+    max: max,
+    log: log,
+    exp: exp,
+    is_nan: is_nan,
+    is_finite: is_finite,
+    clamp: clamp,
+    lerp: lerp,
+    inverse_lerp: inverse_lerp,
+    normalize: normalize,
+    deg_to_rad: deg_to_rad,
+    rad_to_deg: rad_to_deg,
+    distance2d: distance2d,
+    average: average
+}

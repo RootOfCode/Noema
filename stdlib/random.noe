@@ -1,0 +1,24 @@
+function random_between(low, high) {
+    return low + (high - low) * rand()
+}
+
+function random_int_between(low, high) {
+    return low + rand_int(high - low)
+}
+
+function random_bool() {
+    return rand() >= 0.5
+}
+
+function sample(xs) {
+    return choice(xs)
+}
+
+const Random = {
+    value: rand,
+    int: rand_int,
+    between: random_between,
+    int_between: random_int_between,
+    bool: random_bool,
+    sample: sample
+}

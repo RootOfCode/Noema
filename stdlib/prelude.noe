@@ -1,0 +1,36 @@
+use "std/core"
+use "std/io"
+use "std/fs"
+use "std/path"
+use "std/repl"
+use "std/shell"
+use "std/math"
+use "std/random"
+use "std/strings"
+use "std/lists"
+use "std/maps"
+use "std/functional"
+use "std/assert"
+use "std/patterns"
+use "std/dialogue"
+use "std/rules"
+
+const Std = {
+    version: NOEMA_VERSION,
+    Core: Core,
+    IO: IO,
+    FS: FS,
+    Path: Path,
+    REPL: REPL,
+    Shell: Shell,
+    Math: Math,
+    Random: Random,
+    Strings: Strings,
+    List: List,
+    Maps: Maps,
+    Fn: Fn,
+    Assert: Assert,
+    Patterns: Patterns,
+    Dialogue: Dialogue,
+    Rules: Rules
+}

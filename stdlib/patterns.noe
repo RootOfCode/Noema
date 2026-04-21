@@ -1,0 +1,132 @@
+use "std/core"
+use "std/strings"
+use "std/maps"
+
+const DEFAULT_REFLECTIONS = {
+    am: "are",
+    are: "am",
+    was: "were",
+    were: "was",
+    i: "you",
+    me: "you",
+    my: "your",
+    mine: "yours",
+    myself: "yourself",
+    you: "I",
+    your: "my",
+    yours: "mine",
+    yourself: "myself",
+    im: "you are",
+    ive: "you have",
+    ill: "you will"
+}
+
+function normalize_pattern(text) {
+    return Strings.normalize(text)
+}
+
+function fill_template(template, data) {
+    return render_template(string(template), default(data, {}))
+}
+
+function pattern_match(pattern, text, options) {
+    let config = default(options, {})
+    let should_normalize = default(get(config, "normalize", null), true)
+    let source = string(default(text, ""))
+    let shape = string(default(pattern, ""))
+    if should_normalize {
+        source = normalize_pattern(text)
+        shape = normalize_pattern(pattern)
+    }
+    let result = match_pattern(shape, source)
+    result.raw_text = string(default(text, ""))
+    result.raw_pattern = string(default(pattern, ""))
+    result.text = source
+    result.pattern = shape
+    return result
+}
+
+function capture_map(match_value, extra) {
+    let out = {}
+    if type(extra) == "map" {
+        out = Maps.clone(extra)
+    }
+    if match_value == null {
+        return out
+    }
+    out.pattern = match_value.pattern
+    out.raw_pattern = match_value.raw_pattern
+    out.text = match_value.text
+    out.raw_text = match_value.raw_text
+    out.captures = match_value.captures
+    each index in range(0, len(match_value.captures)) {
+        out[string(index + 1)] = match_value.captures[index]
+    }
+    return out
+}
+
+function reflect(text, replacements) {
+    return Strings.word_swap(text, default(replacements, DEFAULT_REFLECTIONS))
+}
+
+function sort_rules(rules) {
+    let out = clone_list(rules)
+    let i = 0
+    while i < len(out) {
+        let j = 0
+        while j < len(out) - i - 1 {
+            let left = default(get(out[j], "priority", 0), 0)
+            let right = default(get(out[j + 1], "priority", 0), 0)
+            if left < right {
+                let swap = out[j]
+                out[j] = out[j + 1]
+                out[j + 1] = swap
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return out
+}
+
+function first_match(rules, text, session) {
+    each rule in sort_rules(rules) {
+        if rule == null {
+            continue
+        }
+
+        let topic = get(rule, "topic", null)
+        if topic != null and session != null {
+            let current_topic = normalize_pattern(default(session.topic, ""))
+            if current_topic != normalize_pattern(topic) {
+                continue
+            }
+        }
+
+        let result = pattern_match(rule.pattern, text, {
+            normalize: default(get(rule, "normalize", null), true)
+        })
+        if not result.ok {
+            continue
+        }
+
+        let guard = get(rule, "guard", null)
+        if guard != null and not guard(result, session, text, rule) {
+            continue
+        }
+
+        return {rule: rule, match: result}
+    }
+    return null
+}
+
+const Patterns = {
+    default_reflections: DEFAULT_REFLECTIONS,
+    normalize: normalize_pattern,
+    match: pattern_match,
+    fill: fill_template,
+    captures: capture_map,
+    reflect: reflect,
+    sort_rules: sort_rules,
+    first_match: first_match
+}

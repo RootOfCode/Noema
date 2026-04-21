@@ -1,0 +1,12 @@
+function parts(path) {
+    return filter(split(path, "/"), fn (part, _) => part != "")
+}
+
+const Path = {
+    join: path_join,
+    dirname: path_dirname,
+    basename: path_basename,
+    extname: path_extname,
+    stem: path_stem,
+    parts: parts
+}

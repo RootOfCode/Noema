@@ -1,0 +1,131 @@
+const NOEMA_VERSION = "Noema 0.3"
+
+function type_of(value) {
+    return type(value)
+}
+
+function identity(value) {
+    return value
+}
+
+function noop(value) {
+    return value
+}
+
+function default(value, fallback) {
+    if value == null {
+        return fallback
+    }
+    return value
+}
+
+function defined(value) {
+    return value != null
+}
+
+function to_string(value) {
+    return string(value)
+}
+
+function to_number(value) {
+    return number(value)
+}
+
+function to_int(value) {
+    return int(value)
+}
+
+function to_bool(value) {
+    return bool(value)
+}
+
+function is_scalar(value) {
+    return is_null(value) or is_bool(value) or is_number(value) or is_string(value)
+}
+
+function truthy(value) {
+    return bool(value)
+}
+
+function falsy(value) {
+    return not bool(value)
+}
+
+function maybe(value, callback, fallback) {
+    if value == null {
+        return fallback
+    }
+    return callback(value, 0)
+}
+
+function clone_list(xs) {
+    let out = []
+    each item in xs {
+        push(out, item)
+    }
+    return out
+}
+
+function repeat_value(value, count) {
+    let out = []
+    each _ in range(0, count) {
+        push(out, value)
+    }
+    return out
+}
+
+function times(count, callback) {
+    let out = []
+    each index in range(0, count) {
+        push(out, callback(index, index))
+    }
+    return out
+}
+
+function enumerate(xs) {
+    let out = []
+    each index in range(0, len(xs)) {
+        push(out, {index: index, value: xs[index]})
+    }
+    return out
+}
+
+const Core = {
+    version: NOEMA_VERSION,
+    type: type,
+    type_of: type_of,
+    string: string,
+    number: number,
+    int: int,
+    bool: bool,
+    parse_number: parse_number,
+    parse_int: parse_int,
+    is_null: is_null,
+    is_bool: is_bool,
+    is_number: is_number,
+    is_string: is_string,
+    is_list: is_list,
+    is_map: is_map,
+    is_function: is_function,
+    is_pointer: is_pointer,
+    is_scalar: is_scalar,
+    len: len,
+    get: get,
+    has: has,
+    range: range,
+    identity: identity,
+    noop: noop,
+    default: default,
+    defined: defined,
+    to_string: to_string,
+    to_number: to_number,
+    to_int: to_int,
+    to_bool: to_bool,
+    truthy: truthy,
+    falsy: falsy,
+    maybe: maybe,
+    clone_list: clone_list,
+    repeat_value: repeat_value,
+    times: times,
+    enumerate: enumerate
+}

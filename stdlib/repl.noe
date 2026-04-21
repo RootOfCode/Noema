@@ -1,0 +1,97 @@
+function repl_create(options) {
+    let config = default(options, {})
+    return {
+        prompt: get(config, "prompt", "repl> "),
+        exit: get(config, "exit", ":exit"),
+        path: get(config, "path", "<repl>"),
+        quiet: get(config, "quiet", false),
+        banner: get(config, "banner", null),
+        on_line: get(config, "on_line", null),
+        on_help: get(config, "on_help", null),
+        on_result: get(config, "on_result", null),
+        on_error: get(config, "on_error", null)
+    }
+}
+
+function repl_eval(state, line) {
+    if state.on_line != null {
+        let value = state.on_line(line, state, 0)
+        if type(value) == "map" and has(value, "ok") and has(value, "value") {
+            return value
+        }
+        return {ok: true, value: value, error: null}
+    }
+    return try_eval(line, state.path)
+}
+
+function repl_show_result(state, result) {
+    if not result.ok {
+        if state.on_error != null {
+            state.on_error(result, state, 0)
+        } else {
+            print("error:", result.error)
+        }
+        return result
+    }
+
+    if result.value != null {
+        if state.on_result != null {
+            state.on_result(result.value, state, 0)
+        } else {
+            print(result.value)
+        }
+    }
+    return result
+}
+
+function repl_help(state) {
+    if state.on_help != null {
+        state.on_help(state, 0)
+        return null
+    }
+    print("Type Noema code and press enter.")
+    print("Commands: :help, help, :quit, quit, #{state.exit}.")
+    print("Core syntax: var, fn, when, unless, each, macro, expand.")
+    print("Stdlib namespaces: Core, IO, FS, Path, REPL, Shell, Math, Random, Strings, List, Maps, Fn, Assert, Patterns, Dialogue, Rules.")
+    return null
+}
+
+function repl_start(options) {
+    let state = repl_create(options)
+    if state.banner != null {
+        print(state.banner)
+    }
+    if not state.quiet {
+        print("REPL ready. #{state.exit} to exit.")
+    }
+
+    while true {
+        let line = read_line(state.prompt)
+        if line == null {
+            return null
+        }
+
+        line = trim(line)
+        if line == "" {
+            continue
+        }
+
+        if line == state.exit or line == ":quit" or line == "quit" {
+            return null
+        }
+
+        if line == ":help" or line == "help" {
+            repl_help(state)
+            continue
+        }
+
+        repl_show_result(state, repl_eval(state, line))
+    }
+}
+
+const REPL = {
+    create: repl_create,
+    eval: repl_eval,
+    help: repl_help,
+    start: repl_start
+}

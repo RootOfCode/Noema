@@ -1,0 +1,191 @@
+use "std/core"
+use "std/io"
+use "std/math"
+use "std/strings"
+
+function create_engine(name) {
+    let kb = expert(name)
+    kb.questions = []
+    kb.derived = []
+    return kb
+}
+
+function fact_set(kb, name, value) {
+    return set_fact(kb, name, value)
+}
+
+function fact_get(kb, name, fallback) {
+    let value = get_fact(kb, name)
+    if value == null {
+        return fallback
+    }
+    return value
+}
+
+function known(kb, name) {
+    return get_fact(kb, name) != null
+}
+
+function clear_facts(kb, names) {
+    each name in names {
+        set_fact(kb, name, null)
+    }
+    return kb
+}
+
+function certainty(value) {
+    return Math.clamp(number(default(value, 0)), -1, 1)
+}
+
+function combine_certainty(left, right) {
+    let a = certainty(left)
+    let b = certainty(right)
+    if a >= 0 and b >= 0 {
+        return a + b * (1 - a)
+    }
+    if a <= 0 and b <= 0 {
+        return a + b * (1 + a)
+    }
+    let denominator = 1 - min(abs(a), abs(b))
+    if denominator == 0 {
+        return 0
+    }
+    return (a + b) / denominator
+}
+
+function update_fact(kb, name, value) {
+    let current = fact_get(kb, name, null)
+    let merged = certainty(value)
+    if current != null {
+        merged = combine_certainty(current, value)
+    }
+    set_fact(kb, name, merged)
+    return merged
+}
+
+function present(kb, name, threshold) {
+    return fact_get(kb, name, 0) >= default(threshold, 0.5)
+}
+
+function absent(kb, name, threshold) {
+    return fact_get(kb, name, 0) <= -default(threshold, 0.5)
+}
+
+function rule(kb, name, condition, action) {
+    add_rule(kb, name, condition, action)
+    return kb
+}
+
+function conclude(name, certainty_value) {
+    return fn (kb, _) {
+        return update_fact(kb, name, certainty_value)
+    }
+}
+
+function reset(kb) {
+    reset_rules(kb)
+    return kb
+}
+
+function infer(kb, limit, derived) {
+    if type(derived) == "list" {
+        clear_facts(kb, derived)
+    }
+    reset(kb)
+    run_rules(kb, default(limit, 32))
+    return kb
+}
+
+function trace_list(kb) {
+    return trace(kb)
+}
+
+function rank(kb, names) {
+    let out = []
+    each name in names {
+        push(out, {name: name, score: fact_get(kb, name, 0)})
+    }
+
+    let i = 0
+    while i < len(out) {
+        let j = 0
+        while j < len(out) - i - 1 {
+            if out[j].score < out[j + 1].score {
+                let swap = out[j]
+                out[j] = out[j + 1]
+                out[j + 1] = swap
+            }
+            j = j + 1
+        }
+        i = i + 1
+    }
+    return out
+}
+
+function parse_certainty(text) {
+    let value = Strings.normalize(text)
+    if value == "" or value == "unknown" or value == "?" {
+        return null
+    }
+    if value == "yes" or value == "y" or value == "true" or value == "present" {
+        return 1
+    }
+    if value == "no" or value == "n" or value == "false" or value == "absent" {
+        return -1
+    }
+    if value == "maybe" {
+        return 0.4
+    }
+    if value == "unlikely" {
+        return -0.4
+    }
+
+    let numeric = parse_number(value, 99)
+    if numeric != 99 and numeric >= -1 and numeric <= 1 {
+        return numeric
+    }
+    if numeric != 99 and numeric >= 0 and numeric <= 100 {
+        return numeric / 100
+    }
+    return null
+}
+
+function ask_certainty(question, why_text) {
+    while true {
+        let answer = Strings.normalize(IO.ask("#{question} ", ""))
+        if answer == "why" and why_text != null {
+            print(why_text)
+            continue
+        }
+        if answer == "help" {
+            print("Answer yes, no, unknown, maybe, unlikely, or a number between -1 and 1.")
+            continue
+        }
+        let parsed = parse_certainty(answer)
+        if parsed != null or answer == "" or answer == "unknown" or answer == "?" {
+            return parsed
+        }
+        print("Please answer yes, no, unknown, maybe, unlikely, or a number between -1 and 1.")
+    }
+}
+
+const Rules = {
+    create: create_engine,
+    set: fact_set,
+    get: fact_get,
+    known: known,
+    clear: clear_facts,
+    certainty: certainty,
+    combine: combine_certainty,
+    update: update_fact,
+    present: present,
+    absent: absent,
+    rule: rule,
+    conclude: conclude,
+    reset: reset,
+    infer: infer,
+    trace: trace_list,
+    rank: rank,
+    parse_certainty: parse_certainty,
+    ask_certainty: ask_certainty
+}
