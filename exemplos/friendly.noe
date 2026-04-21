@@ -1,0 +1,32 @@
+var raw_scores = [12, 7, 18, 4, 15]
+var weighted = List.map(raw_scores, fn (score, index) => score + index * 2)
+var even_scores = List.filter(weighted, fn (score, _) => mod(score, 2) == 0)
+var summary = {
+    title: Strings.title_case("friendly syntax example"),
+    weighted: weighted,
+    top_three: List.take(List.reverse(weighted), 3),
+    total: List.sum(even_scores),
+    average: Math.average(even_scores)
+}
+
+fn banner(name) => Patterns.fill("Hello $name, total=$total, average=$average", {
+    name: name,
+    total: summary.total,
+    average: summary.average
+})
+
+IO.show("title", summary.title)
+IO.show("normalized", Strings.normalize(summary.title))
+IO.puts(banner("Noema"))
+
+unless List.any(summary.weighted, fn (score, _) => score < 0) {
+    IO.puts("all weighted scores are non-negative")
+}
+
+each line in List.map(Core.enumerate(summary.top_three), fn (entry, _) => "#{entry.index}: #{entry.value}") {
+    IO.puts("top #{line}")
+}
+
+var need_match = Patterns.match("i need *", "I need better example coverage", {})
+IO.show("pattern capture", Patterns.captures(need_match, {}))
+IO.show("map values", values({alpha: 10, beta: 20, gamma: 30}))

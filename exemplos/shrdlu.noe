@@ -1,0 +1,290 @@
+use "std/dialogue"
+
+fn seed_world() {
+    let state = {
+        world: world("Blocks"),
+        holding: null,
+        focus: null,
+        objects: ["red", "blue", "green", "yellow"]
+    }
+    place(state.world, "red", "table")
+    place(state.world, "blue", "red")
+    place(state.world, "green", "table")
+    place(state.world, "yellow", "green")
+    return state
+}
+
+var blocks = seed_world()
+
+fn known_object(name) {
+    return List.contains(blocks.objects, name)
+}
+
+fn remember_focus(name) {
+    blocks.focus = name
+    return name
+}
+
+fn canonical_object(text) {
+    let words = filter(Strings.words(text), fn (item, _) {
+        return item != "the" and
+               item != "a" and
+               item != "an" and
+               item != "block" and
+               item != "cube"
+    })
+    if len(words) == 0 {
+        return null
+    }
+    if len(words) == 1 and words[0] == "it" {
+        if blocks.holding != null {
+            return blocks.holding
+        }
+        return blocks.focus
+    }
+    if known_object(words[0]) {
+        return words[0]
+    }
+    if words[0] == "table" or words[0] == "hand" {
+        return words[0]
+    }
+    return null
+}
+
+fn support_of(name) {
+    return where(blocks.world, name)
+}
+
+fn objects_on_text(support) {
+    let values = objects_on(blocks.world, support)
+    if len(values) == 0 {
+        return "nothing"
+    }
+    return join(values, ", ")
+}
+
+fn is_clear(name) {
+    if name == "table" or name == "hand" {
+        return true
+    }
+    return len(objects_on(blocks.world, name)) == 0
+}
+
+fn describe_object(name) {
+    if not known_object(name) {
+        return null
+    }
+    remember_focus(name)
+    return {
+        object: name,
+        on: support_of(name),
+        clear: is_clear(name),
+        holding: blocks.holding == name
+    }
+}
+
+fn print_world() {
+    print("table =", objects_on_text("table"))
+    each name in blocks.objects {
+        print(name, "=", describe_object(name))
+    }
+    if blocks.holding != null {
+        print("hand =", blocks.holding)
+    }
+    return null
+}
+
+fn pick_up(name) {
+    if name == null or not known_object(name) {
+        return "I do not know that block."
+    }
+    if blocks.holding != null {
+        return "I am already holding the #{blocks.holding} block."
+    }
+    if not is_clear(name) {
+        return "I cannot pick up the #{name} block because another block is on it."
+    }
+    place(blocks.world, name, "hand")
+    blocks.holding = name
+    remember_focus(name)
+    return "I am holding the #{name} block."
+}
+
+fn put_on(target) {
+    if blocks.holding == null {
+        return "I am not holding anything."
+    }
+    if target == null {
+        return "I need a destination."
+    }
+    if target != "table" and not known_object(target) {
+        return "I do not know where #{target} is."
+    }
+    if target == blocks.holding {
+        return "I cannot put a block on itself."
+    }
+    if target != "table" and not is_clear(target) {
+        return "The #{target} block is not clear."
+    }
+    let item = blocks.holding
+    place(blocks.world, item, target)
+    blocks.holding = null
+    remember_focus(item)
+    return "I placed the #{item} block on #{target}."
+}
+
+fn move_object(name, target) {
+    if name == null or not known_object(name) {
+        return "I do not know that block."
+    }
+    if target == null {
+        return "I need a destination."
+    }
+    if blocks.holding != null and blocks.holding != name {
+        return "I am already holding the #{blocks.holding} block."
+    }
+    if blocks.holding != name {
+        let attempt = pick_up(name)
+        if blocks.holding != name {
+            return attempt
+        }
+    }
+    return put_on(target)
+}
+
+fn shrdlu_fallback(_, __, ___, ____) {
+    return "I can reason about the blocks world. Type help."
+}
+
+const SHRDLU_RULES = [
+    Dialogue.rule("help", fn (_, __) {
+        shrdlu_help(null, 0)
+        return null
+    }, {priority: 100}),
+    Dialogue.rule("reset", fn (_, __) {
+        blocks = seed_world()
+        return "World reset."
+    }, {priority: 99}),
+    Dialogue.rule("world", fn (_, __) {
+        print_world()
+        return null
+    }, {priority: 98}),
+    Dialogue.rule("show world", fn (_, __) {
+        print_world()
+        return null
+    }, {priority: 98}),
+    Dialogue.rule("describe the world", fn (_, __) {
+        print_world()
+        return null
+    }, {priority: 98}),
+    Dialogue.rule("what are you holding", fn (_, __) {
+        if blocks.holding == null {
+            return "I am not holding anything."
+        }
+        return "I am holding the #{blocks.holding} block."
+    }, {priority: 97}),
+    Dialogue.rule("where is *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        if name == null or not known_object(name) {
+            return "I do not know that block."
+        }
+        remember_focus(name)
+        return "The #{name} block is on #{support_of(name)}."
+    }, {priority: 96}),
+    Dialogue.rule("what is on *", fn (match, __) {
+        let target = canonical_object(match.captures[0])
+        if target == null {
+            return "I do not know that place."
+        }
+        if target != "table" and not known_object(target) {
+            return "I do not know that block."
+        }
+        if target != "table" {
+            remember_focus(target)
+        }
+        return "On #{target}: #{objects_on_text(target)}."
+    }, {priority: 95}),
+    Dialogue.rule("which blocks are on *", fn (match, __) {
+        let target = canonical_object(match.captures[0])
+        if target == null {
+            return "I do not know that place."
+        }
+        if target != "table" and not known_object(target) {
+            return "I do not know that block."
+        }
+        if target != "table" {
+            remember_focus(target)
+        }
+        return "On #{target}: #{objects_on_text(target)}."
+    }, {priority: 95}),
+    Dialogue.rule("is * clear", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        if name == null or not known_object(name) {
+            return "I do not know that block."
+        }
+        remember_focus(name)
+        return "Yes: #{is_clear(name)}."
+    }, {priority: 94}),
+    Dialogue.rule("is * on *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        let target = canonical_object(match.captures[1])
+        if name == null or not known_object(name) {
+            return "I do not know that block."
+        }
+        if target == null {
+            return "I do not know that destination."
+        }
+        remember_focus(name)
+        return "Yes: #{support_of(name) == target}."
+    }, {priority: 94}),
+    Dialogue.rule("describe *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        let value = describe_object(name)
+        if value == null {
+            return "I do not know that block."
+        }
+        return value
+    }, {priority: 93}),
+    Dialogue.rule("pick up *", fn (match, __) {
+        return pick_up(canonical_object(match.captures[0]))
+    }, {priority: 92}),
+    Dialogue.rule("put * on *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        let target = canonical_object(match.captures[1])
+        return move_object(name, target)
+    }, {priority: 91}),
+    Dialogue.rule("stack * on *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        let target = canonical_object(match.captures[1])
+        return move_object(name, target)
+    }, {priority: 91}),
+    Dialogue.rule("move * to *", fn (match, __) {
+        let name = canonical_object(match.captures[0])
+        let target = canonical_object(match.captures[1])
+        return move_object(name, target)
+    }, {priority: 91}),
+    Dialogue.rule("drop it on *", fn (match, __) {
+        return put_on(canonical_object(match.captures[0]))
+    }, {priority: 90})
+]
+
+fn shrdlu_help(_, __) {
+    print("SHRDLU-style blocks world.")
+    print("Examples: where is the blue block, what is on the table, pick up the blue block, put it on the green block.")
+    print("Type bye to leave.")
+}
+
+Dialogue.start({
+    banner: "SHRDLU ready. Type bye to exit.",
+    prompt: "shrdlu> ",
+    exit: "bye",
+    quiet: true,
+    prefix: "shrdlu: ",
+    rules: SHRDLU_RULES,
+    fallback: shrdlu_fallback,
+    on_help: shrdlu_help,
+    session: Dialogue.create({
+        name: "SHRDLU",
+        fallback: shrdlu_fallback
+    })
+})

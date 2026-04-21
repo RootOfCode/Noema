@@ -1,0 +1,34 @@
+import "../plugins/ncurses.noe"
+
+fn draw_line(row, text) {
+    Ncurses.mvaddstr(row, 2, text)
+    return null
+}
+
+var numbers = [2, 4, 6, 8]
+var summary = {
+    title: Strings.title_case("noema ncurses plugin"),
+    average: Math.average(numbers),
+    greeting: Patterns.fill("hello $name", {name: "terminal"}),
+    cosine: Math.cos(Math.pi / 3)
+}
+
+Ncurses.initscr()
+Ncurses.cbreak()
+Ncurses.noecho()
+Ncurses.curs_set(0)
+Ncurses.clear()
+
+draw_line(1, summary.title)
+draw_line(3, "greeting: #{summary.greeting}")
+draw_line(4, "average: #{summary.average}")
+draw_line(5, "cos(pi / 3): #{summary.cosine}")
+draw_line(7, "Press any key, or wait 800ms.")
+
+Ncurses.refresh()
+Ncurses.timeout(800)
+var key = Ncurses.getch()
+Ncurses.endwin()
+
+IO.show("ncurses key", key)
+IO.puts("ncurses plugin demo completed")

@@ -1,0 +1,25 @@
+macro make_metric(name, expr) {
+function $name(values) {
+    return $expr;
+}
+}
+
+var dataset = [3, 5, 8, 13];
+
+expand make_metric(total_metric, sum(values));
+expand make_metric(count_metric, len(values));
+expand make_metric(mean_metric, sum(values) / len(values));
+
+var summary = Patterns.fill("total=$total count=$count mean=$mean", {
+    total: total_metric(dataset),
+    count: count_metric(dataset),
+    mean: mean_metric(dataset)
+});
+
+IO.show("total", total_metric(dataset))
+IO.show("count", count_metric(dataset))
+IO.show("mean", mean_metric(dataset))
+IO.puts(summary)
+
+eval("fn cube(x) => x * x * x;");
+IO.show("cube(4)", cube(4))
