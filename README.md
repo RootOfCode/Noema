@@ -299,14 +299,14 @@ Para uma descricao por arquivo, veja [docs/files.md](docs/files.md).
 
 ## Exemplos incluidos
 
-- [exemplos/meta.noe](examples/meta.noe): macros e `eval(...)`
-- [exemplos/eliza.noe](examples/eliza.noe): terapeuta por regras estilo ELIZA
-- [exemplos/parry.noe](examples/parry.noe): entrevistado paranoico estilo PARRY
-- [exemplos/alice.noe](examples/alice.noe): bot por categorias estilo ALICE
-- [exemplos/mycin.noe](examples/mycin.noe): expert system com fatores de certeza
-- [exemplos/shrdlu.noe](examples/shrdlu.noe): blocks world inspirado em SHRDLU
-- [exemplos/boids.noe](examples/boids.noe): flocking simbolico/comportamental
-- [exemplos/ncurses_demo.noe](examples/ncurses_demo.noe): demo de plugin `ncurses`
+- [exemplos/meta.noe](exemplos/meta.noe): macros e `eval(...)`
+- [exemplos/eliza.noe](exemplos/eliza.noe): terapeuta por regras estilo ELIZA
+- [exemplos/parry.noe](exemplos/parry.noe): entrevistado paranoico estilo PARRY
+- [exemplos/alice.noe](exemplos/alice.noe): bot por categorias estilo ALICE
+- [exemplos/mycin.noe](exemplos/mycin.noe): expert system com fatores de certeza
+- [exemplos/shrdlu.noe](exemplos/shrdlu.noe): blocks world inspirado em SHRDLU
+- [exemplos/boids.noe](exemplos/boids.noe): flocking simbolico/comportamental
+- [exemplos/ncurses_demo.noe](exemplos/ncurses_demo.noe): demo de plugin `ncurses`
 
 `ncurses_demo.noe` e especifico de Linux/Unix.
 
