@@ -229,41 +229,41 @@ Observacao:
 
 ## Exemplos
 
-Todos os arquivos abaixo ficam em [../examples/](../examples).
+Todos os arquivos abaixo ficam em [../exemplos/](../exemplos).
 
-### [../examples/friendly.noe](../examples/friendly.noe)
+### [../exemplos/friendly.noe](../exemplos/friendly.noe)
 
 Exemplo pequeno da sintaxe atual e da stdlib geral.
 
-### [../examples/meta.noe](../examples/meta.noe)
+### [../exemplos/meta.noe](../exemplos/meta.noe)
 
 Macros, expansao de codigo e `eval`.
 
-### [../examples/eliza.noe](../examples/eliza.noe)
+### [../exemplos/eliza.noe](../exemplos/eliza.noe)
 
 REPL conversacional inspirado em ELIZA.
 
-### [../examples/parry.noe](../examples/parry.noe)
+### [../exemplos/parry.noe](../examplos/parry.noe)
 
 REPL conversacional inspirado em PARRY.
 
-### [../examples/alice.noe](../examples/alice.noe)
+### [../exemplos/alice.noe](../exemplos/alice.noe)
 
 Bot por categorias no estilo ALICE/AIML.
 
-### [../examples/mycin.noe](../examples/mycin.noe)
+### [../exemplos/mycin.noe](../exemplos/mycin.noe)
 
 Expert system com fatores de certeza no estilo MYCIN.
 
-### [../examples/shrdlu.noe](../examples/shrdlu.noe)
+### [../exemplos/shrdlu.noe](../exemplos/shrdlu.noe)
 
 Blocks world inspirado em SHRDLU.
 
-### [../examples/boids.noe](../examples/boids.noe)
+### [../exemplos/boids.noe](../exemplos/boids.noe)
 
 Demo de flocking e simulacao simples.
 
-### [../examples/ncurses_demo.noe](../examples/ncurses_demo.noe)
+### [../exemplos/ncurses_demo.noe](../exemplos/ncurses_demo.noe)
 
 Demo isolada do plugin `ncurses`.
 
